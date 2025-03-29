@@ -46,6 +46,12 @@ uint32_t EulFocuser::getPosition(){
 
 void EulFocuser::readPosition()
 {
+    // Threaded reading of the position determined by the Mitutoyo/pi3.
+    //
+    // First opens a socket to listen to the broadcast information port 2345
+    // coming from pi3. Then loops forever, updating shared eul_position
+    // (in micrometers)
+    //
     char buffer[32];
     sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
@@ -80,21 +86,27 @@ void EulFocuser::readPosition()
     while(true){
         bytes_received = recvfrom(udp_socket, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&client_addr, &addr_len);
         if (bytes_received > 0) {
+            //
+            // if bytes received, convert them
+            //
             buffer[bytes_received] = '\0';  // Null-terminate the string
             // std::string message(buffer);
             std::stringstream ss(buffer);
 
             // Lock the mutex before updating shared_data
             std::lock_guard<std::mutex> lock(data_mutex);
-            ss >> eul_position; 
+            ss >> eul_position;
             eul_position*=1000;
             // fprintf(stderr,"pos %f ",eul_position);
             //std::cout << "Received message: " << buffer ;
         }
         else{
+            //
+            // if nothing received, wait for 10 ms then retry
+            //
             //std::cout << "silence " << std::endl;
             // fprintf(stderr,"silence \n");
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));  // Simulate processing delay
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 }
@@ -323,7 +335,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
         fprintf(stderr,"  MoveAbsFocuser looping current %u target %u dir %d\n",current, targetPos, direction);
         do_move(direction,usteps);
         last_direction=direction;
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));  // 
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));  //
         current=getPosition();
         delta_dist=targetPos-current;
         direction = delta_dist < 0 ? FOCUS_INWARD : FOCUS_OUTWARD;
@@ -410,7 +422,7 @@ bool EulFocuser::sendCommand(const char * cmd, char * res, bool silent, int nret
         return false;
     }
     return true;
-    }    
+    }
 
 uint32_t EulFocuser::get_usteps_from_dist(int32_t dist,uint32_t rate){
     // dist is in um
@@ -475,7 +487,7 @@ bool EulFocuser::do_move(FocusDirection newdir, uint32_t microns){
     olddir=newdir;
     fprintf(stderr,"do_move %d steps = %d microns dir = %d\n", count, microns, newdir);
 
-    if (newdir==INFOCUS){  // infocus 
+    if (newdir==INFOCUS){  // infocus
         gclr(&dir);
     }
     else{                   // outfocus
