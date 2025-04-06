@@ -335,6 +335,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
         fprintf(stderr,"  MoveAbsFocuser looping current %u target %u dir %d\n",current, targetPos, direction);
         do_move(direction,usteps);
         last_direction=direction;
+        current=getPosition();
         std::this_thread::sleep_for(std::chrono::milliseconds(250));  //
         current=getPosition();
         delta_dist=targetPos-current;
