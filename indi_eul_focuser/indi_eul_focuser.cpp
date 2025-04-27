@@ -340,6 +340,8 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
         current=getPosition();
         delta_dist=targetPos-current;
         direction = delta_dist < 0 ? FOCUS_INWARD : FOCUS_OUTWARD;
+        if (direction==last_direction) backl=0;
+        else if (direction>last_direction) backl=backlash[1];
     }
 
 
