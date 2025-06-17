@@ -21,8 +21,10 @@
 #define STEP (23)
 #define ENABLE (25)
 #define GPIOCHIP "/dev/gpiochip4"
+#define SAVEPOS "/home/fmeyer/.indi/tcp_focuser_position"
 
 std::mutex data_mutex;  // Mutex to protect shared data
+FILE *mystderr;
 
 // We declare an auto pointer to EulFocuser.
 static std::unique_ptr<EulFocuser> eulFocuser(new EulFocuser());
@@ -52,39 +54,53 @@ void EulFocuser::readPosition()
     // coming from pi3. Then loops forever, updating shared eul_position
     // (in micrometers)
     //
-    char buffer[32];
+    char buffer[32], *res=NULL;
+    size_t nbSent;
     sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
     int bytes_received;
 
     sockaddr_in server_addr;
-    int udp_socket;
-    int port=2345;
+    int tcp_socket;
+    int port=2346;
 
     // Create a UDP socket
-    udp_socket= socket(AF_INET, SOCK_DGRAM, 0);
-    if (udp_socket < 0) {
+    tcp_socket= socket(AF_INET, SOCK_STREAM, 0);
+    if (tcp_socket < 0) {
         std::cerr << "Failed to create socket" << std::endl;
         return;
     }
 
     // Setup server address structure
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_addr.s_addr = inet_addr("192.168.1.40");
     server_addr.sin_port = htons(port);
-    // fprintf(stderr," going to be Listening for UDP messages on port %d.",port);
+    // fprintf(mystderr," going to be Listening for UDP messages on port %d.",port);
 
-    if (bind(udp_socket, (sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        fprintf(stderr," Socket failed ");
+    if (connect(tcp_socket, (sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        fprintf(mystderr," Socket failed ");
         return ;
     }
+    FILE *fpos=fopen(SAVEPOS,"r");
 
-    int flags = fcntl(udp_socket, F_GETFL, 0);
-    fcntl(udp_socket, F_SETFL, flags | O_NONBLOCK);
-    fprintf(stderr," Socket ok ");
+    *buffer='s'; // sync command
+    if (fpos != NULL){
+        res=fgets(buffer+1,16, fpos);
+        fclose(fpos);
+    }
+
+    if (res==NULL){
+        snprintf(buffer+1,8,"2000\n");
+    }
+
+    nbSent=write(tcp_socket, buffer, strlen(buffer));
+
+//    int flags = fcntl(udp_socket, F_GETFL, 0);
+//    fcntl(udp_socket, F_SETFL, flags | O_NONBLOCK);
+    fprintf(mystderr," Socket ok ");
 
     while(true){
-        bytes_received = recvfrom(udp_socket, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&client_addr, &addr_len);
+        bytes_received = recvfrom(tcp_socket, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&client_addr, &addr_len);
         if (bytes_received > 0) {
             //
             // if bytes received, convert them
@@ -96,8 +112,7 @@ void EulFocuser::readPosition()
             // Lock the mutex before updating shared_data
             std::lock_guard<std::mutex> lock(data_mutex);
             ss >> eul_position;
-            eul_position*=1000;
-            // fprintf(stderr,"pos %f ",eul_position);
+            //fprintf(mystderr,"pos %f \n",eul_position);
             //std::cout << "Received message: " << buffer ;
         }
         else{
@@ -105,8 +120,8 @@ void EulFocuser::readPosition()
             // if nothing received, wait for 10 ms then retry
             //
             //std::cout << "silence " << std::endl;
-            // fprintf(stderr,"silence \n");
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            // fprintf(mystderr,"silence \n");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
 }
@@ -142,7 +157,7 @@ bool EulFocuser::initProperties()
             perror("req dir");
         }
     }
-
+    mystderr=fopen ("/tmp/logindieulfocuser","w");
     step.nr=STEP;
     step.line=gpiod_chip_get_line(chip, step.nr);
     if (step.line==NULL){
@@ -181,12 +196,12 @@ bool EulFocuser::initProperties()
 
     // Set limits as per documentation
     FocusAbsPosN[0].min  = 100;
-    FocusAbsPosN[0].max  = 9100;
-    FocusAbsPosN[0].step = 10;
+    FocusAbsPosN[0].max  = 4400;
+    FocusAbsPosN[0].step = 1;
     strncpy(FocusRelPosN[0].label, "um", MAXINDILABEL);
     strncpy(FocusAbsPosN[0].label, "um", MAXINDILABEL);
     strncpy(FocusMaxPosN[0].label, "um", MAXINDILABEL);
-    FocusMaxPosN[0].value=9100;
+    FocusMaxPosN[0].value=4400;
 
     FocusRelPosN[0].min  = 0;
     FocusRelPosN[0].max  = 2000;
@@ -276,6 +291,7 @@ bool EulFocuser::saveConfigItems(FILE *fp)
 
 void EulFocuser::TimerHit()
 {
+    static int8_t counter;
     //LOG_INFO("timer hit");
     //readPosition();
     if (!isConnected())
@@ -284,12 +300,25 @@ void EulFocuser::TimerHit()
     // TODO: Poll your device if necessary. Otherwise delete this method and it's
     // declaration in the header file.
     //readPosition();
-    //fprintf(stderr,"eulpos: %.3f\n",eul_position);
-    //fflush(stderr);
+    //fprintf(mystderr,"eulpos: %.3f\n",eul_position);
+    //fflush(mystderr);
     FocusAbsPosN[0].value = eul_position;
     //FocusAbsPosN[0].value = 5000;
     IDSetNumber(&FocusAbsPosNP, nullptr);
 
+    if (counter--<0){
+        counter=30 ; // every 30 calls to timer (time depending on SetTimer)
+                     // write current position 
+        FILE *fpos=fopen(SAVEPOS,"w+");
+
+        if (fpos != NULL){
+            fprintf(fpos, "%d\n", (int)eul_position);
+            fclose(fpos);
+        }
+        else{
+            fprintf(stderr,"# failed writing %d to %s\n", (int)eul_position,SAVEPOS); 
+        }
+    }
     //LOG_INFO("timer hit");
     SetTimer(1000);
 
@@ -312,7 +341,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
     static FocusDirection last_direction;
     uint32_t maxmove=60, count=0;
     uint32_t current, usteps, backl;
-    int32_t delta_dist;
+    int32_t delta_dist, waitSettle;
     FocusDirection direction;
 
     current=getPosition();
@@ -320,32 +349,40 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
 
     direction = delta_dist < 0 ? FOCUS_INWARD : FOCUS_OUTWARD;
     usteps=get_usteps_from_dist(delta_dist,usteps_per_mm); // delta_dist in um
+    usteps=get_usteps_from_dist(delta_dist,5); // delta_dist in um
 
     backl=backlash[0];
     if (direction==last_direction) backl=0;
     else if (direction>last_direction) backl=backlash[1];
 
-    usteps=backl*(direction!=last_direction);
+    usteps=usteps+backl;
     last_direction=direction;
-    fprintf(stderr,"EulFocuser::MoveAbsFocuser current %u target %u dir %d\n",current, targetPos, direction);
+    fprintf(mystderr,"EulFocuser::MoveAbsFocuser current %u target %u dir %d\n",current, targetPos, direction);
     while(labs(targetPos-current)>accuracy && count<maxmove) {
         ++count;
-        usteps=get_usteps_from_dist(current-targetPos,usteps_per_mm);
-        usteps=backl+std::max((uint32_t)4,usteps);
-        fprintf(stderr,"  MoveAbsFocuser looping current %u target %u dir %d\n",current, targetPos, direction);
+        fprintf(mystderr,"  MoveAbsFocuser looping current %u target %u dir %d\n",current, targetPos, direction);
+        fflush(mystderr);
         do_move(direction,usteps);
         last_direction=direction;
-        current=getPosition();
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));  //
+        //   if(usteps>50)
+        //       waitSettle=30;
+        //   else
+        //       waitSettle=200;
+        waitSettle=100;
+        std::this_thread::sleep_for(std::chrono::milliseconds(waitSettle));  //
         current=getPosition();
         delta_dist=targetPos-current;
         direction = delta_dist < 0 ? FOCUS_INWARD : FOCUS_OUTWARD;
         if (direction==last_direction) backl=0;
         else if (direction>last_direction) backl=backlash[1];
+
+        usteps=get_usteps_from_dist(delta_dist,5);
+        usteps=backl+std::max((uint32_t)4,usteps);
     }
 
 
     LOGF_INFO("MoveAbsFocuser: %d final reading %d", targetPos, current);
+    fflush(mystderr);
 
     return IPS_OK;
 }
@@ -378,7 +415,7 @@ bool EulFocuser::Connect()
     readThread = new std::thread(&EulFocuser::readPosition);
     DEBUG(INDI::Logger::DBG_SESSION, "starting processor ");
 
-    fflush(stderr);
+    fflush(mystderr);
     DEBUG(INDI::Logger::DBG_SESSION, "Eul Focuser.");
     return true;
 }
@@ -428,16 +465,18 @@ bool EulFocuser::sendCommand(const char * cmd, char * res, bool silent, int nret
     }
 
 uint32_t EulFocuser::get_usteps_from_dist(int32_t dist,uint32_t rate){
+    int32_t usteps;
     // dist is in um
     // rate is in usteps per mm
     //
     // return value is in usteps
     //return abs(int(ceil(dist)*rate))
-    return labs(dist)*rate/1000;
+    usteps=labs(dist)*rate;
+    return usteps;
 }
 
 bool EulFocuser::gprint(gpin pin){
-    fprintf(stderr," %4s #%d = %d\n", pin.name, pin.nr, pin.state);
+    fprintf(mystderr," %4s #%d = %d\n", pin.name, pin.nr, pin.state);
     return true;
 }
 
@@ -445,7 +484,7 @@ bool EulFocuser::gwrite(gpin *pin, int state ){
     int err;
     err=gpiod_line_set_value(pin->line, state);
     if(err!=0){
-        fprintf(stderr,"gwrite error pin %d reqstate %d errno %d \n", pin->nr, err, state);
+        fprintf(mystderr,"gwrite error pin %d reqstate %d errno %d \n", pin->nr, err, state);
         perror("gwrite");
     }
 
@@ -477,18 +516,19 @@ bool EulFocuser::gtoggle(gpin *pin){
     return true;
 }
 
-bool EulFocuser::do_move(FocusDirection newdir, uint32_t microns){
+bool EulFocuser::do_move(FocusDirection newdir, uint32_t encoderSteps){
     static FocusDirection olddir;
     int32_t count;
 
     gclr(&enable);
 
-    count=(usteps_per_mm*microns)/1000;
+    //    count=(usteps_per_mm*microns)/1000;
+    count=encoderSteps; // with esp 
     if (olddir!=newdir){
         count=count+backlash[newdir];
     }
     olddir=newdir;
-    fprintf(stderr,"do_move %d steps = %d microns dir = %d\n", count, microns, newdir);
+    fprintf(mystderr,"do_move %d steps = %d microns dir = %d\n", count, encoderSteps, newdir);
 
     if (newdir==INFOCUS){  // infocus
         gclr(&dir);
