@@ -368,7 +368,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
         //       waitSettle=30;
         //   else
         //       waitSettle=200;
-        waitSettle=100;
+        waitSettle=40;
         std::this_thread::sleep_for(std::chrono::milliseconds(waitSettle));  //
         current=getPosition();
         delta_dist=targetPos-current;
@@ -377,7 +377,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
         else if (direction>last_direction) backl=backlash[1];
 
         usteps=get_usteps_from_dist(delta_dist,5);
-        usteps=backl+std::max((uint32_t)4,usteps);
+        usteps=backl+std::max((uint32_t)60,usteps);
     }
 
 
