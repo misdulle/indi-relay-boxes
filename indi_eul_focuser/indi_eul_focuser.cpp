@@ -100,6 +100,9 @@ void EulFocuser::readPosition()
     fprintf(mystderr," Socket ok ");
 
     while(true){
+        // wait for measurements from the focuser controller:
+        // those are sent whenever a change occurs or upon every TimerHit() call
+        //
         bytes_received = recvfrom(tcp_socket, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&client_addr, &addr_len);
         if (bytes_received > 0) {
             //
