@@ -1,0 +1,6 @@
+cmake -DCMAKE_INSTALL_PREFIX=/usr ..
+
+20250913: to compile, had to tamper with /usr/include/libindi/defaultdevice.h
+removed :
+#include <any>
+#include <string>

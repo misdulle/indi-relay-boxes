@@ -198,21 +198,21 @@ bool EulFocuser::initProperties()
     addDebugControl();
 
     // Set limits as per documentation
-    FocusAbsPosN[0].min  = 100;
-    FocusAbsPosN[0].max  = 4400;
-    FocusAbsPosN[0].step = 1;
-    strncpy(FocusRelPosN[0].label, "um", MAXINDILABEL);
-    strncpy(FocusAbsPosN[0].label, "um", MAXINDILABEL);
-    strncpy(FocusMaxPosN[0].label, "um", MAXINDILABEL);
-    FocusMaxPosN[0].value=4400;
+    FocusAbsPosNP[0].min  = 100;
+    FocusAbsPosNP[0].max  = 4400;
+    FocusAbsPosNP[0].step = 1;
+    strncpy(FocusRelPosNP[0].label, "um", MAXINDILABEL);
+    strncpy(FocusAbsPosNP[0].label, "um", MAXINDILABEL);
+    strncpy(FocusMaxPosNP[0].label, "um", MAXINDILABEL);
+    FocusMaxPosNP[0].value=4400;
 
-    FocusRelPosN[0].min  = 0;
-    FocusRelPosN[0].max  = 2000;
-    FocusRelPosN[0].step = 10;
+    FocusRelPosNP[0].min  = 0;
+    FocusRelPosNP[0].max  = 2000;
+    FocusRelPosNP[0].step = 10;
 
-    FocusSpeedN[0].min  = 1;
-    FocusSpeedN[0].max  = 254;
-    FocusSpeedN[0].step = 10;
+    FocusSpeedNP[0].min  = 1;
+    FocusSpeedNP[0].max  = 254;
+    FocusSpeedNP[0].step = 10;
 
     return true;
 }
@@ -296,7 +296,6 @@ void EulFocuser::TimerHit()
 {
     static int8_t counter;
     //LOG_INFO("timer hit");
-    //readPosition();
     if (!isConnected())
         return;
 
@@ -305,10 +304,10 @@ void EulFocuser::TimerHit()
     //readPosition();
     //fprintf(mystderr,"eulpos: %.3f\n",eul_position);
     //fflush(mystderr);
-    FocusAbsPosN[0].value = eul_position;
+    FocusAbsPosNP[0].value = eul_position;
     //FocusAbsPosN[0].value = 5000;
-    IDSetNumber(&FocusAbsPosNP, nullptr);
-
+    //IDSetNumber(&FocusAbsPosNP, nullptr);
+    //FocusAbsPosNP[0].setValue(
     if (counter--<0){
         counter=30 ; // every 30 calls to timer (time depending on SetTimer)
                      // write current position 
@@ -346,6 +345,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
     uint32_t current, usteps, backl;
     int32_t delta_dist, waitSettle;
     FocusDirection direction;
+    FocusAbsPosNP.setState(IPS_BUSY);
 
     current=getPosition();
     delta_dist=targetPos-current;
@@ -386,6 +386,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
 
     LOGF_INFO("MoveAbsFocuser: %d final reading %d", targetPos, current);
     fflush(mystderr);
+    FocusAbsPosNP.setState(IPS_IDLE);
 
     return IPS_OK;
 }
