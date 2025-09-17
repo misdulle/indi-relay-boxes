@@ -386,7 +386,7 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
 
     LOGF_INFO("MoveAbsFocuser: %d final reading %d", targetPos, current);
     fflush(mystderr);
-    FocusAbsPosNP.setState(IPS_IDLE);
+    FocusAbsPosNP.setState(IPS_OK);
 
     return IPS_OK;
 }
