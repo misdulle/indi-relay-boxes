@@ -295,6 +295,7 @@ bool EulFocuser::saveConfigItems(FILE *fp)
 void EulFocuser::TimerHit()
 {
     static int8_t counter;
+    static int savedPos;
     //LOG_INFO("timer hit");
     if (!isConnected())
         return;
@@ -310,15 +311,18 @@ void EulFocuser::TimerHit()
     //FocusAbsPosNP[0].setValue(
     if (counter--<0){
         counter=30 ; // every 30 calls to timer (time depending on SetTimer)
-                     // write current position 
-        FILE *fpos=fopen(SAVEPOS,"w+");
+                     // write current position
+        if (eul_position >0 && int(eul_position) != savedPos){
+            FILE *fpos=fopen(SAVEPOS,"w+");
 
-        if (fpos != NULL){
-            fprintf(fpos, "%d\n", (int)eul_position);
-            fclose(fpos);
-        }
-        else{
-            fprintf(stderr,"# failed writing %d to %s\n", (int)eul_position,SAVEPOS); 
+            if (fpos != NULL && eul_position >0 && int(eul_position) != savedPos){
+                savedPos=int(eul_position);
+                fprintf(fpos, "%d\n", savedPos);
+                fclose(fpos);
+            }
+            else{
+                fprintf(stderr,"# failed writing %d to %s\n", (int)eul_position,SAVEPOS);
+            }
         }
     }
     //LOG_INFO("timer hit");
@@ -527,7 +531,7 @@ bool EulFocuser::do_move(FocusDirection newdir, uint32_t encoderSteps){
     gclr(&enable);
 
     //    count=(usteps_per_mm*microns)/1000;
-    count=encoderSteps; // with esp 
+    count=encoderSteps; // with esp
     if (olddir!=newdir){
         count=count+backlash[newdir];
     }
