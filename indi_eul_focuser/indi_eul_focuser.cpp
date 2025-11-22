@@ -21,7 +21,7 @@
 #define STEP (23)
 #define ENABLE (25)
 #define GPIOCHIP "/dev/gpiochip4"
-#define SAVEPOS "/home/fmeyer/.indi/tcp_focuser_position"
+#define SAVEPOS "/home/fmeyer/.indi/tcpFocuserPosition"
 
 std::mutex data_mutex;  // Mutex to protect shared data
 FILE *mystderr;
