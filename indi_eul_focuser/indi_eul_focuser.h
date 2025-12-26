@@ -19,6 +19,8 @@ public:
     virtual bool ISSnoopDevice(XMLEle *root) override;
 
     virtual void TimerHit() override;
+    bool openSocket();
+    uint32_t getPosition(uint32_t);
 
 protected:
     virtual bool saveConfigItems(FILE *fp) override;
@@ -33,7 +35,9 @@ private:
     virtual bool Disconnect();
     bool sendCommand(const char * cmd, char * res = nullptr, bool silent = false, int nret = 0);
     static const uint8_t EF_TIMEOUT { 3 };
-    // int udp_socket;
+    int tcp_socket=-1;
+    sockaddr_in server_addr;
+    socklen_t addr_len;
     static int init_udp_listener(int port);
     static uint32_t get_usteps_from_dist(int32_t dist,uint32_t rate);
     static void udp_listener(int port);
@@ -57,10 +61,10 @@ private:
     uint32_t usteps_per_step=32;
     uint32_t delay_step=125;    // these are usecs
     uint32_t backlash[2]={
-        80, // [0] = backlash when going from OUTFOCUS to INFOCUS
-        80  // [1] = backlash when going from INFOCUS to OUTFOCUS
+        800, // [0] = backlash when going from OUTFOCUS to INFOCUS
+        800  // [1] = backlash when going from INFOCUS to OUTFOCUS
     };
-    uint32_t accuracy=1;  // with esp tcp, accuracy = encoder resolution (1 = .02 mm)
+    uint32_t accuracy=2;  // with esp tcp, accuracy = encoder resolution (1 = .02 mm)
                           // In general :
                           //   accuracy = 8 * fd^2 * wl / rms (final unit is um)
                           //   8 is a constant
