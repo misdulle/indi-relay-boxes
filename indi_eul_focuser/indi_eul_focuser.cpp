@@ -45,21 +45,19 @@ uint32_t EulFocuser::getPosition(){
     ssize_t bytes_received=1;
     sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
-    char buffer[256];
-
-        bytes_received = recv(tcp_socket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
-        if (bytes_received > 0) {
-            //
-            // if bytes received, convert them
-            //
-            buffer[bytes_received] = '\0';  // Null-terminate the string
-                                            // std::string message(buffer);
-            std::stringstream ss(buffer+bytes_received-5);
-            ss >> eul_position;
-            std::cout << "Received message: " << buffer ;
-            fprintf(mystderr,"%s %ld %d \n",buffer,bytes_received, (int)eul_position);
-            fflush(mystderr);
-        }
+    char buffer[1024];
+    do {
+    bytes_received = recv(tcp_socket, buffer, sizeof(buffer) - 1, MSG_DONTWAIT);
+    if (bytes_received > 0) {
+        //
+        // if bytes received, convert them
+        //
+        buffer[bytes_received] = '\0';  // Null-terminate the string
+                                        // std::string message(buffer);
+        std::stringstream ss(buffer+bytes_received-5); // retain only last value
+        ss >> eul_position;
+    }
+    } while ( bytes_received>0);
 
     return (uint32_t) eul_position;
 }
@@ -369,14 +367,16 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
         ++count;
         fprintf(mystderr,"  MoveAbsFocuser looping current %u target %u dir %d\n",current, targetPos, direction);
         fflush(mystderr);
+        waitSettle=10+(usteps*2/10);
         do_move(direction,usteps);
         last_direction=direction;
         //   if(usteps>50)
         //       waitSettle=30;
         //   else
         //       waitSettle=200;
-        waitSettle=40;
+        waitSettle=80;
         std::this_thread::sleep_for(std::chrono::milliseconds(waitSettle));  //
+
         current=getPosition();
         delta_dist=targetPos-current;
         direction = delta_dist < 0 ? FOCUS_INWARD : FOCUS_OUTWARD;
