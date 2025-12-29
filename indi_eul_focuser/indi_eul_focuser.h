@@ -61,8 +61,8 @@ private:
     uint32_t usteps_per_step=32;
     uint32_t delay_step=125;    // these are usecs
     uint32_t backlash[2]={
-        800, // [0] = backlash when going from OUTFOCUS to INFOCUS
-        800  // [1] = backlash when going from INFOCUS to OUTFOCUS
+        200, // [0] = backlash when going from OUTFOCUS to INFOCUS
+        200  // [1] = backlash when going from INFOCUS to OUTFOCUS
     };
     uint32_t accuracy=2;  // with esp tcp, accuracy = encoder resolution (1 = .02 mm)
                           // In general :

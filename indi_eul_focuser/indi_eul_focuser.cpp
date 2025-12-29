@@ -365,16 +365,15 @@ IPState EulFocuser::MoveAbsFocuser(uint32_t targetPos)
     fprintf(mystderr,"EulFocuser::MoveAbsFocuser current %u target %u dir %d\n",current, targetPos, direction);
     while(labs(targetPos-current)>accuracy && count<maxmove) {
         ++count;
-        fprintf(mystderr,"  MoveAbsFocuser looping current %u target %u dir %d\n",current, targetPos, direction);
+        fprintf(mystderr,"  MoveAbsFocuser looping current %u target %u dir %d count %d\n",current, targetPos, direction, count);
         fflush(mystderr);
-        waitSettle=10+(usteps*2/10);
+        waitSettle=200;
         do_move(direction,usteps);
         last_direction=direction;
         //   if(usteps>50)
         //       waitSettle=30;
         //   else
         //       waitSettle=200;
-        waitSettle=80;
         std::this_thread::sleep_for(std::chrono::milliseconds(waitSettle));  //
 
         current=getPosition();
