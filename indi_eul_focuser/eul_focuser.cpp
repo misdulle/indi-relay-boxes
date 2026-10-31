@@ -80,10 +80,10 @@ bool EulFocuser::initProperties()
     MotorNP[M_HOLD_MS].fill("HOLD_MS", "Hold time after move (ms)", "%.0f", 0, 600000, 500, 5000);
     MotorNP.fill(dev, "MOTOR_PARAMS", "Motor", "Motor", IP_RW, 0, IPS_IDLE);
 
-    LoopNP[L_TOL].fill("TOLERANCE_UM", "Tolerance (um)", "%.0f", 1, 500, 1, 20);
+    LoopNP[L_TOL].fill("TOLERANCE_UM", "Tolerance (um)", "%.0f", 1, 500, 1, 1);
     LoopNP[L_PASSES].fill("MAX_PASSES", "Max correction passes", "%.0f", 1, 20, 1, 5);
-    LoopNP[L_BACK_IN].fill("BACKLASH_IN_UM", "Backlash, moving in (um)", "%.0f", 0, 2000, 10, 200);
-    LoopNP[L_BACK_OUT].fill("BACKLASH_OUT_UM", "Backlash, moving out (um)", "%.0f", 0, 2000, 10, 200);
+    LoopNP[L_BACK_IN].fill("BACKLASH_IN_UM", "Backlash, moving in (um)", "%.0f", 0, 2000, 10, 500);
+    LoopNP[L_BACK_OUT].fill("BACKLASH_OUT_UM", "Backlash, moving out (um)", "%.0f", 0, 2000, 10, 500);
     LoopNP[L_STALL_MARGIN].fill("STALL_MARGIN_UM", "Stall margin (um)", "%.0f", 50, 5000, 10, 300);
     LoopNP[L_UM_PER_COUNT].fill("ENCODER_UM_PER_COUNT", "Encoder um / count", "%.0f", 1, 1000, 1, 1);
     LoopNP[L_MIN_POS].fill("MIN_POSITION_UM", "Minimum position (um)", "%.0f", 0, 100000, 10, 500);
