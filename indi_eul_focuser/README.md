@@ -34,7 +34,7 @@ gpiochip4, named pinctrl-rp1). STEP=23, DIR=24, ENABLE=25 are BCM numbers = line
 
 ## Arduino side
 
-UDP datagrams to `<pi>:<UDP port>` (default 5005). One integer per line, in encoder counts
+UDP datagrams to `<pi>:<UDP port>` (default 2345). One integer per line, in encoder counts
 (default 1 count = 1 um, setting `ENCODER_UM_PER_COUNT`; the stream is already in um). Lines starting with `ypr` are ignored.
 Send on change, and at least once per second.
 

@@ -58,7 +58,7 @@ bool EulFocuser::initProperties()
 
     const char *dev = getDeviceName();
 
-    UdpNP[U_PORT].fill("UDP_PORT", "UDP port", "%.0f", 1024, 65535, 1, 5005);
+    UdpNP[U_PORT].fill("UDP_PORT", "UDP port", "%.0f", 1024, 65535, 1, 2345);
     UdpNP[U_STALE_MOVING].fill("STALE_MOVING_MS", "Data timeout moving (ms)", "%.0f", 100, 5000, 50, 500);
     UdpNP[U_STALE_IDLE].fill("STALE_IDLE_MS", "Data timeout idle (ms)", "%.0f", 1500, 60000, 100, 3000);
     UdpNP.fill(dev, "UDP_SETTINGS", "Encoder UDP", "Encoder", IP_RW, 0, IPS_IDLE);
