@@ -1,4 +1,4 @@
-# indi-eul-focuser
+# indi-encoder-focuser
 
 Closed-loop stepper focuser for a Raspberry Pi 5: STEP/DIR/ENABLE on GPIO, position
 feedback from a UDP stream (Arduino + mechanical encoder). All units are micrometres.
@@ -27,14 +27,14 @@ legacy/wrapper API change: build with `-DEF_FOCUS_WRAPPED=1` or `=0`
     #   @gpio  -  rtprio  60
     #   @gpio  -  memlock unlimited
     # log out/in, then:
-    indiserver -v indi_eul_focuser
+    indiserver -v indi_encoder_focuser
 
 Check which gpiochip carries the header pins with `gpioinfo` (the Pi 5 header is normally
 gpiochip4, named pinctrl-rp1). STEP=23, DIR=24, ENABLE=25 are BCM numbers = line offsets there.
 
 ## Arduino side
 
-UDP datagrams to `<pi>:<UDP port>` (default 2345). One integer per line, in encoder counts
+UDP datagrams to `<pi>:<UDP port>` (default 5005). One integer per line, in encoder counts
 (default 1 count = 1 um, setting `ENCODER_UM_PER_COUNT`; the stream is already in um). Lines starting with `ypr` are ignored.
 Send on change, and at least once per second.
 
@@ -56,3 +56,33 @@ overshoots it reverses (one "pass"); more than MAX_PASSES -> alert. Alerts also 
 (steps without encoder change, allowance = stall margin + backlash after a reversal), loss of UDP
 data during a move, travel limits, GPIO errors. Motor stays enabled for `HOLD_MS` after a move.
 Settings changed during a move apply to the next move.
+
+## IMU safety flag (SCOPE_SAFETY)
+
+The IMU data is read from its own UDP port, `IMU_UDP_PORT` in the "Safety" group (default 2345; 0 or
+the encoder port = same stream as the encoder; changes apply immediately). Both sockets accept both line
+types. Two line formats are understood:
+- quaternion `w0.062378wa-0.955933ab-0.286682bc-0.012878c` (w, x, y, z); converted to yaw/pitch/roll
+  in degrees with the MPU6050-DMP convention (Jeff Rowberg's dmpGetYawPitchRoll).
+- `ypr <yaw> <pitch> <roll>` in degrees (separators: space, tab, comma, colon).
+
+Group "Safety": `IMU_ANGLES` (live angles), `IMU_CHECK` (which axes take part), `IMU_LIMITS`
+(centre and +/- tolerance per axis, hold time, data timeout), `IMU_CAPTURE` (button: centre := current
+angles) and the output light `SCOPE_SAFETY/SAFE` (Ok = safe), refreshed every second.
+Safe means: fresh IMU data AND at least one axis checked AND every checked axis within
+centre +/- tolerance (wrap-around aware) for `SAFE_HOLD_MS` (it turns unsafe immediately).
+Unconfigured (no axis checked) = NOT safe. Park the scope, press the capture button, tick the axes,
+adjust the tolerances, then "Save Configuration". The focuser must stay connected for the flag to exist.
+
+## Setting the position on the ESP32 (command port)
+
+The ESP32 sketch accepts `s <value>` (um) on a TCP command port (default 2348) and answers `OK <value>`.
+The driver can use it (group "Encoder"):
+- `ESP_HOST`: address of the ESP32. Empty = the sender address of the UDP datagrams (automatic).
+- `ESP_COMMAND_PORT`: TCP port (2348) and timeout.
+- `ESP_SET_POSITION`: enter a value (um) to set the ESP32 encoder to it. The software offset is reset
+  to 0, because the ESP32 now holds the position itself. Refused while moving.
+- `SYNC_MODE`: *Sync changes the offset* (default, as before) or *Sync sets the ESP32 encoder*.
+- `RESTORE_MODE` has a third choice, *Push last position to ESP32*: at connect, once the first encoder
+  reading has arrived, the last saved position is pushed into the ESP32 (retried every 5 s, moves are
+  blocked until it succeeds).
