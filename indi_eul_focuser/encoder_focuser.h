@@ -115,6 +115,8 @@ class EncoderFocuser : public INDI::Focuser
         void applyRel();
         void setAbsLimits(double mn, double mx);
         double getMaxPos();
+        void applyMax();
+        void applyLimits();   // LOOP_PARAMS min/max -> FOCUS_MAX and the absolute-position range
         void setMaxPos(double v);
 
         static int64_t nowNs();
@@ -124,7 +126,8 @@ class EncoderFocuser : public INDI::Focuser
         INDI::PropertyNumber UdpNP     {3};   // port, stale timeouts
         INDI::PropertyNumber GpioNP    {4};   // chip, step, dir, enable
         INDI::PropertyNumber MotorNP   {9};
-        INDI::PropertyNumber LoopNP    {7};
+        INDI::PropertyNumber LoopNP    {6};
+        INDI::PropertyNumber LimitsNP  {2};   // travel limits, next to FOCUS_MAX in the Main Control tab
         INDI::PropertyNumber PosStateNP{2};   // persisted
         INDI::PropertyNumber StatusNP  {3};   // read only, defined when connected
         INDI::PropertySwitch EnablePolSP{2};
@@ -145,7 +148,8 @@ class EncoderFocuser : public INDI::Focuser
         enum { G_CHIP, G_STEP, G_DIR, G_ENABLE };
         enum { M_USTEPS_MM, M_USTEPS_STEP, M_DELAY_FAST, M_DELAY_FINE, M_DELAY_START, M_RAMP_STEPS,
                M_FINE_ZONE, M_PULSE, M_HOLD_MS };
-        enum { L_TOL, L_PASSES, L_BACK_IN, L_BACK_OUT, L_STALL_MARGIN, L_UM_PER_COUNT, L_MIN_POS };
+        enum { L_TOL, L_PASSES, L_BACK_IN, L_BACK_OUT, L_STALL_MARGIN, L_UM_PER_COUNT };
+        enum { LIM_MIN, LIM_MAX };
         enum { P_LAST, P_OFFSET };
         enum { S_RAW, S_POS, S_AGE };
         enum { E_PORT, E_TIMEOUT };

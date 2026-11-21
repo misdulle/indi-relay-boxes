@@ -88,8 +88,11 @@ bool EncoderFocuser::initProperties()
     LoopNP[L_BACK_OUT].fill("BACKLASH_OUT_UM", "Backlash, moving out (um)", "%.0f", 0, 2000, 10, 200);
     LoopNP[L_STALL_MARGIN].fill("STALL_MARGIN_UM", "Stall margin (um)", "%.0f", 50, 5000, 10, 300);
     LoopNP[L_UM_PER_COUNT].fill("ENCODER_UM_PER_COUNT", "Encoder um / count", "%.0f", 1, 1000, 1, 1);
-    LoopNP[L_MIN_POS].fill("MIN_POSITION_UM", "Minimum position (um)", "%.0f", 0, 100000, 10, 500);
     LoopNP.fill(dev, "LOOP_PARAMS", "Closed loop", "Motor", IP_RW, 0, IPS_IDLE);
+
+    LimitsNP[LIM_MIN].fill("MIN_POSITION_UM", "Minimum position (um)", "%.0f", 0, 100000, 10, 500);
+    LimitsNP[LIM_MAX].fill("MAX_POSITION_UM", "Maximum position (um)", "%.0f", 0, 1000000, 10, 6000);
+    LimitsNP.fill(dev, "TRAVEL_LIMITS", "Travel limits", "Main Control", IP_RW, 0, IPS_IDLE);
 
     PosStateNP[P_LAST].fill("LAST_POSITION_UM", "Last position (um)", "%.0f", -1e7, 1e8, 1, 0);
     PosStateNP[P_OFFSET].fill("ENCODER_OFFSET_UM", "Encoder offset (um)", "%.0f", -1e8, 1e8, 1, 0);
@@ -157,10 +160,9 @@ bool EncoderFocuser::initProperties()
     RestoreSP[2].fill("RESTORE_ESP", "Push last position to ESP32", ISS_OFF);
     RestoreSP.fill(dev, "RESTORE_MODE", "Position at connect", "Encoder", IP_RW, ISR_1OFMANY, 0, IPS_IDLE);
 
-    // Travel range 500 .. 6000 um
-    setMaxPos(6000);
-    setAbsLimits(500, 6000);
-    setAbsValue(500);
+    // Travel range comes from LOOP_PARAMS (defaults 500 .. 6000 um; config is loaded later)
+    applyLimits();
+    setAbsValue(LimitsNP[LIM_MIN].getValue());
 
     return true;
 }
@@ -176,6 +178,7 @@ void EncoderFocuser::ISGetProperties(const char *dev)
     defineProperty(GpioNP);
     defineProperty(MotorNP);
     defineProperty(LoopNP);
+    defineProperty(LimitsNP);
     defineProperty(PosStateNP);
     defineProperty(EnablePolSP);
     defineProperty(DirPolSP);
@@ -196,6 +199,7 @@ void EncoderFocuser::ISGetProperties(const char *dev)
         loadConfig(true, GpioNP.getName());
         loadConfig(true, MotorNP.getName());
         loadConfig(true, LoopNP.getName());
+        loadConfig(true, LimitsNP.getName());
         loadConfig(true, PosStateNP.getName());
         loadConfig(true, EnablePolSP.getName());
         loadConfig(true, DirPolSP.getName());
@@ -207,7 +211,7 @@ void EncoderFocuser::ISGetProperties(const char *dev)
         loadConfig(true, EspNP.getName());
         loadConfig(true, SyncPushSP.getName());
         refreshCfg();
-        setAbsLimits(LoopNP[L_MIN_POS].getValue(), getMaxPos());
+        applyLimits();
     }
 }
 
@@ -217,6 +221,9 @@ bool EncoderFocuser::updateProperties()
 
     if (isConnected())
     {
+        applyLimits();      // the base class may have reset FOCUS_MAX; our saved value wins
+        applyAbs();
+        applyMax();
         defineProperty(StatusNP);
         defineProperty(ImuAnglesNP);
         defineProperty(SafetyLP);
@@ -237,6 +244,7 @@ bool EncoderFocuser::saveConfigItems(FILE *fp)
     GpioNP.save(fp);
     MotorNP.save(fp);
     LoopNP.save(fp);
+    LimitsNP.save(fp);
     PosStateNP.save(fp);
     EnablePolSP.save(fp);
     DirPolSP.save(fp);
@@ -266,8 +274,8 @@ void EncoderFocuser::refreshCfg()
     c.backIn = LoopNP[L_BACK_IN].getValue();
     c.backOut = LoopNP[L_BACK_OUT].getValue();
     c.stallMarginUm = LoopNP[L_STALL_MARGIN].getValue();
-    c.minPos = static_cast<int>(LoopNP[L_MIN_POS].getValue());
-    c.maxPos = static_cast<int>(getMaxPos());
+    c.minPos = static_cast<int>(LimitsNP[LIM_MIN].getValue());
+    c.maxPos = static_cast<int>(LimitsNP[LIM_MAX].getValue());
     c.staleMovingMs = static_cast<int>(UdpNP[U_STALE_MOVING].getValue());
     c.enableActiveLow = (EnablePolSP.findOnSwitchIndex() != 1);
     c.dirHighIncreases = (DirPolSP.findOnSwitchIndex() != 1);
@@ -327,8 +335,21 @@ bool EncoderFocuser::ISNewNumber(const char *dev, const char *name, double value
         if (handle(LoopNP))
         {
             refreshCfg();
-            setAbsLimits(LoopNP[L_MIN_POS].getValue(), getMaxPos());
+            return true;
+        }
+        if (handle(LimitsNP))
+        {
+            if (LimitsNP[LIM_MIN].getValue() >= LimitsNP[LIM_MAX].getValue())
+            {
+                LOG_ERROR("Minimum position must be below the maximum position.");
+                LimitsNP.setState(IPS_ALERT);
+                LimitsNP.apply();
+                return true;
+            }
+            applyLimits();
+            refreshCfg();
             applyAbs();
+            applyMax();
             return true;
         }
         if (handle(ImuNP))
@@ -1246,9 +1267,18 @@ bool EncoderFocuser::SyncFocuser(uint32_t ticks)
 
 bool EncoderFocuser::SetFocuserMaxPosition(uint32_t ticks)
 {
-    setAbsLimits(LoopNP[L_MIN_POS].getValue(), ticks);
+    // The client changed FOCUS_MAX: keep the driver's own (persisted) value in step.
+    LimitsNP[LIM_MAX].setValue(ticks);
+    LoopNP.apply();
+    applyLimits();
     refreshCfg();
     return true;
+}
+
+void EncoderFocuser::applyLimits()
+{
+    setMaxPos(LimitsNP[LIM_MAX].getValue());
+    setAbsLimits(LimitsNP[LIM_MIN].getValue(), LimitsNP[LIM_MAX].getValue());
 }
 
 // =====================================================================================
@@ -1371,6 +1401,7 @@ void EncoderFocuser::setAbsLimits(double mn, double mx)
 }
 double EncoderFocuser::getMaxPos() { return FocusMaxPosNP[0].getValue(); }
 void EncoderFocuser::setMaxPos(double v) { FocusMaxPosNP[0].setValue(v); }
+void EncoderFocuser::applyMax() { FocusMaxPosNP.apply(); }
 #else
 void EncoderFocuser::setAbsValue(double v) { FocusAbsPosN[0].value = v; }
 void EncoderFocuser::setAbsState(IPState s) { FocusAbsPosNP.s = s; }
@@ -1385,6 +1416,7 @@ void EncoderFocuser::setAbsLimits(double mn, double mx)
 }
 double EncoderFocuser::getMaxPos() { return FocusMaxPosN[0].value; }
 void EncoderFocuser::setMaxPos(double v) { FocusMaxPosN[0].value = v; }
+void EncoderFocuser::applyMax() { IDSetNumber(&FocusMaxPosNP, nullptr); }
 #endif
 
 
