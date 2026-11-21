@@ -4,6 +4,13 @@ from .indi import SWITCH_VECTOR
 
 HIDDEN_RELAY_NAMES = ("none",)
 
+_MEMBER_VALUE_KEYS = {
+    "SwitchVector": ("on",),
+    "TextVector": ("text",),
+    "NumberVector": ("value", "min", "max", "step"),
+    "LightVector": ("light",),
+}
+
 
 class IndiModel:
     def __init__(self):
@@ -14,7 +21,30 @@ class IndiModel:
         if not vector.get("device"):
             return
         self.devices.add(vector["device"])
-        self.properties[(vector["device"], vector["name"])] = vector
+        key = (vector["device"], vector["name"])
+        current = self.properties.get(key)
+        if current is not None and not vector.get("defined", True):
+            # set*Vector updates carry state but no labels; merge them into
+            # the stored definition instead of wiping names from PORTS etc.
+            self.properties[key] = self._merge_update(current, vector)
+        else:
+            self.properties[key] = vector
+
+    @staticmethod
+    def _merge_update(current, vector):
+        merged = dict(current)
+        merged["defined"] = True
+        merged["state"] = vector.get("state", current.get("state"))
+        if vector.get("message"):
+            merged["message"] = vector["message"]
+        value_keys = _MEMBER_VALUE_KEYS.get(vector["type"], ())
+        members = dict(current["members"])
+        for name, member in vector["members"].items():
+            updated = dict(members.get(name, member))
+            updated.update({key: member[key] for key in value_keys if key in member})
+            members[name] = updated
+        merged["members"] = members
+        return merged
 
     def remove(self, device, name):
         self.properties.pop((device, name), None)

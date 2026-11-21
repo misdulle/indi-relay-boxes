@@ -54,6 +54,7 @@ def vector_from_element(elem):
         "perm": elem.get("perm", ""),
         "rule": elem.get("rule", ""),
         "message": elem.get("message", ""),
+        "defined": elem.tag in _DEF_TAGS,
         "members": {},
     }
     for child in elem:

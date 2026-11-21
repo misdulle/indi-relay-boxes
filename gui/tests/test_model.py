@@ -123,3 +123,59 @@ def test_remove_property():
     model.remove("KMTronic8", "PORTS")
     assert model.get("KMTronic8", "PORTS") is None
     model.remove("KMTronic8", "PORTS")
+
+
+def test_set_update_keeps_labels_and_merges_members():
+    model = make_model()
+    assert [p["label"] for p in model.ports("KMTronic8")] == ["Pi5", "Mount", "camera"]
+    update = vector_from_element(ET.fromstring(
+        '<setSwitchVector device="KMTronic8" name="PORTS" state="IPS_BUSY">'
+        '<oneSwitch name="PORT01">Off</oneSwitch>'
+        '<oneSwitch name="PORT02">On</oneSwitch>'
+        '<oneSwitch name="PORT03">On</oneSwitch>'
+        '<oneSwitch name="PORT04">Off</oneSwitch>'
+        "</setSwitchVector>"))
+    model.apply_vector(update)
+    ports = model.ports("KMTronic8")
+    assert [p["label"] for p in ports] == ["Pi5", "Mount", "camera"]
+    assert [p["on"] for p in ports] == [False, True, False]
+    assert model.get("KMTronic8", "PORTS")["state"] == "IPS_BUSY"
+
+
+def test_set_update_keeps_new_member_and_defines_wins():
+    model = make_model()
+    update = vector_from_element(ET.fromstring(
+        '<setSwitchVector device="KMTronic8" name="PORTS" state="IPS_OK">'
+        '<oneSwitch name="PORT05">On</oneSwitch>'
+        "</setSwitchVector>"))
+    model.apply_vector(update)
+    ports = {p["name"]: p for p in model.ports("KMTronic8")}
+    assert ports["PORT05"]["on"] is True
+
+    definition = vector_from_element(ET.fromstring(
+        '<defSwitchVector device="KMTronic8" name="PORTS" state="IPS_OK">'
+        '<defSwitch name="PORT01" label="Renamed">On</defSwitch>'
+        "</defSwitchVector>"))
+    model.apply_vector(definition)
+    labels = [p["label"] for p in model.ports("KMTronic8")]
+    assert labels == ["Renamed"]
+
+    update = vector_from_element(ET.fromstring(
+        '<setSwitchVector device="KMTronic8" name="PORTS" state="IPS_OK">'
+        '<oneSwitch name="PORT01">On</oneSwitch>'
+        '<oneSwitch name="PORT05">Off</oneSwitch>'
+        "</setSwitchVector>"))
+    model.apply_vector(update)
+    names_ = {p["name"]: p["on"] for p in model.ports("KMTronic8")}
+    assert names_ == {"PORT01": True, "PORT05": False}
+
+
+def test_set_update_light_values_only():
+    model = make_model()
+    update = vector_from_element(ET.fromstring(
+        '<setLightVector device="eulRoof" name="ROOF_SAFETY_STATUS" state="IPS_OK">'
+        '<oneLight name="IMU_SAFE">Ok</oneLight>'
+        "</setLightVector>"))
+    model.apply_vector(update)
+    lights = model.roof_safety("eulRoof")
+    assert lights == {"MOUNT_PARKED": "IPS_OK", "IMU_SAFE": "IPS_OK"}
