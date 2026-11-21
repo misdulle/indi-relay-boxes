@@ -2,7 +2,7 @@ import time
 import xml.etree.ElementTree as ET
 
 
-from indi_relay_gui.controller import Controller, Mode
+from indi_relay_gui.controller import CONNECT_POLL_S, Controller, Mode
 from indi_relay_gui.indi import vector_from_element
 from indi_relay_gui.model import IndiModel
 
@@ -174,15 +174,59 @@ def test_devices_ready_lists_missing_devices():
     assert "EulFocuser" not in missing
 
 
-def test_ensure_device_connected_sends_connect_once_per_device():
+def test_ensure_device_connected_sends_full_connect_vector_once():
     controller, events, client, log = make_controller()
     assert client.switches == []
     controller.ensure_device_connected("EulFocuser")
-    assert client.switches == [("EulFocuser", "CONNECTION", [("CONNECT", True)])]
+    assert client.switches == [
+        ("EulFocuser", "CONNECTION", [("CONNECT", True), ("DISCONNECT", False)])]
     controller.ensure_device_connected("EulFocuser")
     assert len(client.switches) == 1
     controller.ensure_device_connected("NotAConfiguredDevice")
     assert len(client.switches) == 1
+    assert any("requesting CONNECTION/CONNECT" in line
+               for line in log if "EulFocuser" in line)
+
+
+def connect_count(client, device):
+    return sum(1 for dev, name, _ in client.switches
+               if name == "CONNECTION" and dev == device)
+
+
+def test_poll_device_connections_retries_until_acknowledged():
+    controller, events, client, log = make_controller()
+    start = 1000.0
+    controller.poll_device_connections(start)
+    assert connect_count(client, "Relay16") == 1
+    controller.poll_device_connections(start + 1.0)
+    assert connect_count(client, "Relay16") == 1
+    controller.poll_device_connections(start + CONNECT_POLL_S)
+    assert connect_count(client, "Relay16") == 2
+    controller.note_connection_state("Relay16", True)
+    controller.poll_device_connections(start + 2 * CONNECT_POLL_S)
+    assert connect_count(client, "Relay16") == 2
+
+
+def test_external_disconnect_rearms_connect():
+    controller, events, client, log = make_controller()
+    start = 2000.0
+    controller.poll_device_connections(start)
+    controller.note_connection_state("Relay16", True)
+    assert controller.device_connection_status("Relay16") == "connected"
+    controller.note_connection_state("Relay16", False)
+    assert controller.device_connection_status("Relay16") == "waiting"
+    controller.poll_device_connections(start + 11.0)
+    assert connect_count(client, "Relay16") == 2
+    assert any("requesting CONNECTION/CONNECT" in line for line in log)
+
+
+def test_device_connection_status_transitions():
+    controller, events, client, log = make_controller()
+    assert controller.device_connection_status("Relay16") == "waiting"
+    controller.poll_device_connections(1000.0)
+    assert controller.device_connection_status("Relay16") == "connecting"
+    controller.note_connection_state("Relay16", True)
+    assert controller.device_connection_status("Relay16") == "connected"
 
 
 def test_forget_device_allows_reconnect():

@@ -36,10 +36,13 @@ remaining steps and returns to `inactive` without switching anything off.
 ## Device connection
 
 Connecting to the indiserver only lists the running drivers - it does not
-switch them on. The GUI therefore sends `CONNECTION / CONNECT` to every
-device listed under `devices:` as soon as the indiserver announces one of
-its properties, and remembers which drivers it already switched on (a driver
-restart triggers a new CONNECT).
+switch them on. The GUI therefore sends the full `CONNECTION` switch vector
+(`CONNECT` = On, `DISCONNECT` = Off) to every device listed under `devices:`
+right after the server link is up, and repeats it every 5 seconds for any
+driver that has not confirmed `CONNECT` = On (an unconnected driver publishes
+nothing - e.g. `PORTS` is only defined once connected). Each driver's status
+appears as a row in the Heartbeats panel; a driver restart or an external
+disconnect triggers a new CONNECT automatically.
 
 ## Roof buttons and safety
 

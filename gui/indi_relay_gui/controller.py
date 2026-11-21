@@ -9,9 +9,13 @@ Modes:
 """
 
 import threading
+import time
 
 from .checks import CheckRunner, build_monitors
 from .sequence import SequenceRunner, StepContext
+
+
+CONNECT_POLL_S = 5.0
 
 
 class Mode:
@@ -38,27 +42,83 @@ class Controller:
         self.checks = None
         self.monitors = build_monitors(config["checks"])
         self.connected_devices = set()
+        self._confirmed_devices = set()
+        self._connect_attempts = {}
+        self._logged_attempts = set()
         for monitor in self.monitors.values():
             monitor.start()
 
     def ensure_device_connected(self, device):
-        """Send CONNECTION/CONNECT to each configured driver the first time the
-        indiserver reports one of its properties. getProperties alone only
-        lists the drivers; every device must be switched on explicitly."""
-        if (device not in self.config["devices"].values()
-                or device in self.connected_devices):
+        """Send CONNECTION/CONNECT to a configured driver.  Connecting to the
+        indiserver only lists the drivers; every device must be switched on
+        explicitly.  Called when the server announces one of the device's
+        properties and periodically by poll_device_connections()."""
+        if device not in self.config["devices"].values():
             return
-        self.connected_devices.add(device)
+        if device in self.connected_devices or device in self._confirmed_devices:
+            return
+        self._send_connect(device, time.time())
+
+    def _send_connect(self, device, now):
         try:
-            self.client.new_switch(device, "CONNECTION", [("CONNECT", True)])
-            self.log("%s: connecting" % device)
+            self.client.new_switch(device, "CONNECTION",
+                                   [("CONNECT", True), ("DISCONNECT", False)])
+        except ConnectionError:
+            return False
         except Exception as error:
             self.log("%s: connect failed: %s" % (device, error))
+            return False
+        self.connected_devices.add(device)
+        self._connect_attempts[device] = now
+        if device not in self._logged_attempts:
+            self._logged_attempts.add(device)
+            self.log("%s: requesting CONNECTION/CONNECT" % device)
+        return True
+
+    def poll_device_connections(self, now):
+        """Retry CONNECT for configured devices that never acknowledged.
+        An undisconnected driver publishes nothing (?PORTS is only defined
+        once connected), so this must not depend on the driver announcing
+        itself first."""
+        for device in sorted(set(self.config["devices"].values())):
+            if device in self._confirmed_devices:
+                continue
+            last = self._connect_attempts.get(device)
+            if last is not None and now - last < CONNECT_POLL_S:
+                continue
+            self._send_connect(device, now)
+
+    def note_connection_state(self, device, connect_on):
+        """Track CONNECTION switch reports from the drivers: CONNECT On proves
+        the driver is up, DISCONNECT On arms another connect attempt."""
+        if device not in self.config["devices"].values():
+            return
+        if connect_on:
+            self._confirmed_devices.add(device)
             self.connected_devices.discard(device)
+            if device in self._logged_attempts:
+                self.log("%s: connected" % device)
+                self._logged_attempts.discard(device)
+        else:
+            self._confirmed_devices.discard(device)
 
     def forget_device(self, device, name="CONNECTION"):
         if name == "CONNECTION":
+            self._confirmed_devices.discard(device)
             self.connected_devices.discard(device)
+
+    def reset_connections(self):
+        self.connected_devices.clear()
+        self._confirmed_devices.clear()
+        self._connect_attempts.clear()
+        self._logged_attempts.clear()
+
+    def device_connection_status(self, device):
+        if device in self._confirmed_devices:
+            return "connected"
+        if device in self.connected_devices:
+            return "connecting"
+        return "waiting"
 
     def shutdown(self):
         self._stop_checks()

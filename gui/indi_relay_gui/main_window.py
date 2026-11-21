@@ -477,6 +477,11 @@ class MainWindow(QMainWindow):
     def _on_vector(self, vector):
         self._last_server_rx = time.time()
         self.controller.ensure_device_connected(vector.get("device", ""))
+        if (vector.get("name") == "CONNECTION"
+                and vector.get("type") == "SwitchVector"):
+            self.controller.note_connection_state(
+                vector.get("device", ""),
+                vector["members"].get("CONNECT", {}).get("on", False))
         if vector.get("name") == "SCOPE_SAFETY":
             self._safety_rx = time.time()
             self._safety_ok = (vector["members"].get("SAFE", {}).get("light") == "IPS_OK")
@@ -490,7 +495,7 @@ class MainWindow(QMainWindow):
 
     def _on_disconnected(self, reason):
         self.model = IndiModel()
-        self.controller.connected_devices.clear()
+        self.controller.reset_connections()
         self._safety_rx = None
         self._safety_ok = False
         self.log("indiserver connection lost: %s" % reason)
@@ -526,6 +531,15 @@ class MainWindow(QMainWindow):
         now = time.time()
         entries = {}
         connected = self.client is not None
+        if connected:
+            self.controller.poll_device_connections(now)
+        for device in sorted(set(self.config["devices"].values())):
+            state = self.controller.device_connection_status(device)
+            entries[device] = {
+                "ok": state == "connected",
+                "known": state != "waiting",
+                "age": None,
+                "message": "CONNECTION %s" % state}
         server_age = now - self._last_server_rx
         entries["indiserver"] = {
             "ok": connected and server_age < 30,

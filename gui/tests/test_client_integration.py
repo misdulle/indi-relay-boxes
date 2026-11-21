@@ -5,7 +5,9 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from indi_relay_gui.indi import IndiClient
+from indi_relay_gui.controller import Controller
+from indi_relay_gui.indi import IndiClient, vector_from_element
+from indi_relay_gui.model import IndiModel
 
 
 DEF_VECTOR = (
@@ -151,3 +153,60 @@ def test_client_send_without_connection_raises():
     client = IndiClient("127.0.0.1", 1)
     with pytest.raises(ConnectionError):
         client.new_switch("X", "Y", [("Z", True)])
+
+
+CONNECTION_DEF_VECTOR = (
+    '<defSwitchVector device="Relay16" name="CONNECTION" state="IPS_IDLE" '
+    'perm="IP_RW" rule="ISR_1OFMANY">'
+    '<defSwitch name="CONNECT">Off</defSwitch>'
+    '<defSwitch name="DISCONNECT">On</defSwitch></defSwitchVector>'
+).encode("utf-8")
+
+
+def test_client_answers_connection_def_with_connect_vector():
+    server = FakeIndiServer(reply=CONNECTION_DEF_VECTOR)
+    server.start()
+    config = {"devices": {"relay16": "Relay16"},
+              "checks": {"interval_s": 1, "grace_s": 0, "items": []},
+              "sequences": {"starting": [], "stopping": []},
+              "roof_timeout_s": 30, "relay_exclude_names": ["none"],
+              "indiserver": {"host": "127.0.0.1", "port": server.port}}
+    model = IndiModel()
+    controller = Controller(model, None, config, lambda *_: None)
+    client = IndiClient("127.0.0.1", server.port)
+    controller.client = client
+
+    def on_vector(vector):
+        received.append(vector)
+        model.apply_vector(vector)
+        controller.ensure_device_connected(vector.get("device", ""))
+        if (vector.get("name") == "CONNECTION"
+                and vector.get("type") == "SwitchVector"):
+            controller.note_connection_state(
+                vector.get("device", ""),
+                vector["members"].get("CONNECT", {}).get("on", False))
+
+    received = []
+    client.on_vector = on_vector
+    try:
+        assert client.connect() is True
+        assert wait_until(lambda: len(received) == 1)
+        assert controller.device_connection_status("Relay16") == "connecting"
+        assert wait_until(lambda: any("newSwitchVector" in line
+                                      for line in server.received))
+        sent = [line for line in server.received if "newSwitchVector" in line][-1]
+        assert "device='Relay16'" in sent
+        assert "name='CONNECTION'" in sent
+        assert "<oneSwitch name='CONNECT'>On</oneSwitch>" in sent
+        assert "<oneSwitch name='DISCONNECT'>Off</oneSwitch>" in sent
+
+        ack = vector_from_element(ET.fromstring(
+            '<setSwitchVector device="Relay16" name="CONNECTION" state="IPS_OK">'
+            '<oneSwitch name="CONNECT">On</oneSwitch>'
+            '<oneSwitch name="DISCONNECT">Off</oneSwitch></setSwitchVector>'))
+        on_vector(ack)
+        assert controller.device_connection_status("Relay16") == "connected"
+    finally:
+        controller.shutdown()
+        client.close()
+        server.stop()
