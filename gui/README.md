@@ -52,11 +52,14 @@ OPEN / CLOSE / STOP are push buttons, not toggles: pressing one sends a single
 pulse-off timing itself. The GUI sends one command per click and displays the
 resulting shutter state reported by the driver.
 
-OPEN and CLOSE are only clickable when the scope is **safe**, i.e. the
-`EulFocuser` driver reports `SCOPE_SAFETY / SAFE` = Ok. If the focuser is not
-data, the roof driver's `IMU_SAFE` light is used as a fallback; no data at all
-counts as *not safe*. The current safety state is shown in the roof panel's
-safety list.
+OPEN and CLOSE are only clickable when the mode conditions are met **and**
+the roof can actually move: the scope must be **safe** (the `EulFocuser`
+driver reports `SCOPE_SAFETY / SAFE` = Ok, fallback `IMU_SAFE` of the roof
+driver, no data counts as *not safe*), the roof motor power must be **on**
+(`MOTOR_POWER` light of `ROOF_SAFETY_STATUS`) and the roof driver must be
+online. While disabled, hovering a button shows why it is locked ("not in
+static mode; roof motor power off", ...). The roof panel's safety list shows
+mount parked, IMU, motor power and the driver's move-allowed lights.
 
 ## Heartbeats panel
 

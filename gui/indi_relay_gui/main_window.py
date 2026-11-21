@@ -212,9 +212,12 @@ class RoofPanel(QGroupBox):
         self.safety_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.safety_tree)
 
-    def refresh(self, model, device, move_allowed, stop_allowed, scope_safe=False):
-        self.open_button.setEnabled(move_allowed and scope_safe)
-        self.close_button.setEnabled(move_allowed and scope_safe)
+    def refresh(self, model, device, movable, stop_allowed, scope_safe=False,
+                block_reason=""):
+        self.open_button.setEnabled(movable)
+        self.close_button.setEnabled(movable)
+        self.open_button.setToolTip(block_reason)
+        self.close_button.setToolTip(block_reason)
         self.stop_button.setEnabled(stop_allowed)
         if device is None or model.get(device, "DOME_SHUTTER") is None:
             self.state_label.setText("offline")
@@ -567,9 +570,10 @@ class MainWindow(QMainWindow):
             seen.add(device)
             panel.refresh(self.model, device, interactive)
         self.roof_panel.refresh(self.model, self.config["devices"].get("roof"),
-                                self.controller.roof_move_allowed(),
-                                self.controller.roof_stop_allowed(),
-                                scope_safe=self.controller.scope_safe())
+                                movable=self.controller.roof_movable(),
+                                stop_allowed=self.controller.roof_stop_allowed(),
+                                scope_safe=self.controller.scope_safe(),
+                                block_reason=self.controller.roof_block_reason())
         self.mode_panel.refresh(self.controller.mode, self.controller.allowed_mode_changes(),
                                 self.controller.is_busy())
         checks = self.controller.checks

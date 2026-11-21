@@ -158,6 +158,34 @@ class Controller:
     def roof_stop_allowed(self):
         return self.mode != Mode.INACTIVE
 
+    def roof_power_ok(self):
+        """True / False per the roof driver's MOTOR_POWER light; None = the
+        roof driver does not report motor power (e.g. offline)."""
+        roof = self.config["devices"].get("roof")
+        vector = self.model.get(roof, "ROOF_SAFETY_STATUS")
+        if vector is None:
+            return None
+        member = vector["members"].get("MOTOR_POWER")
+        if member is None:
+            return None
+        return member.get("light") == "IPS_OK"
+
+    def roof_block_reason(self):
+        reasons = []
+        if not self.roof_move_allowed():
+            reasons.append("not in static mode")
+        if not self.scope_safe():
+            reasons.append("scope safety not ok")
+        if self.roof_power_ok() is False:
+            reasons.append("roof motor power off")
+        roof = self.config["devices"].get("roof")
+        if roof is None or self.model.get(roof, "DOME_SHUTTER") is None:
+            reasons.append("roof driver offline")
+        return "; ".join(reasons)
+
+    def roof_movable(self):
+        return not self.roof_block_reason()
+
     def allowed_mode_changes(self):
         if self.is_busy():
             return []

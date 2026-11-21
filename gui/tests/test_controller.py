@@ -257,3 +257,36 @@ def test_scope_safe_defaults_to_false_without_data():
     model = make_model(scope_safety=None, imu_safe=None)
     controller = Controller(model, FakeClient(), make_config(), lambda *_: None)
     assert controller.scope_safe() is False
+
+
+def test_roof_movable_gates_on_motor_power():
+    controller, events, client, log = make_controller()
+    controller.set_mode(Mode.STATIC)
+    assert controller.roof_power_ok() is None
+    assert controller.roof_movable() is True
+    assert controller.roof_block_reason() == ""
+
+    add_light(controller.model, "eulRoof", "ROOF_SAFETY_STATUS", "MOTOR_POWER", "Busy")
+    assert controller.roof_power_ok() is False
+    assert controller.roof_movable() is False
+    assert "roof motor power off" in controller.roof_block_reason()
+
+    add_light(controller.model, "eulRoof", "ROOF_SAFETY_STATUS", "MOTOR_POWER", "Ok")
+    assert controller.roof_movable() is True
+    assert controller.roof_block_reason() == ""
+
+
+def test_roof_block_reason_mentions_mode_and_safety():
+    controller, events, client, log = make_controller()
+    reason = controller.roof_block_reason()
+    assert "not in static mode" in reason
+    add_light(controller.model, "EulFocuser", "SCOPE_SAFETY", "SAFE", "Alert")
+    assert "scope safety not ok" in controller.roof_block_reason()
+
+
+def test_roof_movable_false_when_roof_offline():
+    controller, events, client, log = make_controller()
+    controller.set_mode(Mode.STATIC)
+    del controller.model.properties[("eulRoof", "DOME_SHUTTER")]
+    assert controller.roof_movable() is False
+    assert "roof driver offline" in controller.roof_block_reason()
