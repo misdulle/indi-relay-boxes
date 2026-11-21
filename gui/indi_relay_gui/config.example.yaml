@@ -1,0 +1,83 @@
+# indi-relay-boxes GUI configuration.
+# Copy to ~/.config/indi-relay-boxes/config.yaml or pass --config <file>.
+
+indiserver:
+  host: 192.168.1.29
+  port: 7624
+
+# INDI device names as reported by the drivers (INDI driver "name").
+devices:
+  relay16: Relay16
+  kmtronic8: KMTronic8
+  roof: eulRoof
+
+# Relays whose displayed name (PORT_NAMES entry) matches one of these are hidden.
+relay_exclude_names: [none]
+
+sequences:
+  # Executed when switching the operating mode to "starting".
+  # Goes to "running" automatically when every step succeeds.
+  starting:
+    - step: relay_on
+      device: kmtronic8
+      port: pi5
+    - step: wait
+      seconds: 30
+    - step: roof_open
+      timeout: 180
+    - step: relay_on
+      device: kmtronic8
+      port: mount
+    - step: relay_on
+      device: kmtronic8
+      port: camera
+
+  # Executed when switching to "stopping". Ends in "inactive" when done.
+  stopping:
+    - step: roof_close
+      timeout: 180
+    - step: relay_off
+      device: kmtronic8
+      port: camera
+    - step: relay_off
+      device: kmtronic8
+      port: mount
+    - step: wait
+      seconds: 5
+    - step: relay_off
+      device: kmtronic8
+      port: pi5
+
+# Extra health checks that run while the operating mode is "running".
+# interval_s: how often all enabled checks are evaluated.
+# grace_s:    cool-down after a recovery action before counting new failures.
+# failures:   consecutive failed evaluations before the recovery sequence runs.
+# recovery:   a sequence (same step vocabulary) executed once per failure episode.
+checks:
+  interval_s: 15
+  grace_s: 120
+  pi5_ping:
+    type: ping
+    enabled: true
+    host: 192.168.1.29
+    timeout_s: 5
+    failures: 3
+    recovery:
+      - step: relay_cycle
+        device: kmtronic8
+        port: pi5
+        seconds: 10
+  imu_udp:
+    type: udp
+    enabled: true
+    bind: 0.0.0.0
+    port: 9541
+    timeout_s: 60
+    failures: 3
+    recovery:
+      - step: relay_cycle
+        device: kmtronic8
+        port: imu
+        seconds: 10
+
+roof_timeout_s: 180

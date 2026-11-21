@@ -1,0 +1,492 @@
+"""PyQt5 user interface for the observatory relay / roof manager."""
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import (
+    QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
+    QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+
+from .controller import Controller, Mode
+from .indi import IndiClient
+from .model import IndiModel
+
+IPSTATE_COLORS = {
+    "IPS_OK": "#2e8b57",
+    "IPS_BUSY": "#d0a020",
+    "IPS_ALERT": "#c0392b",
+    "IPS_IDLE": "#7f8c8d",
+}
+LIGHT_COLORS = {
+    "IPS_OK": "#2e8b57",
+    "IPS_BUSY": "#d0a020",
+    "IPS_ALERT": "#c0392b",
+    "IPS_IDLE": "#7f8c8d",
+}
+SAFETY_LABELS = (
+    ("MOUNT_PARKED", "Mount parked"),
+    ("IMU_SAFE", "Scope safe (IMU)"),
+    ("MOTOR_POWER", "Motor power"),
+    ("MOVE_ALLOWED", "Move allowed"),
+)
+MODE_COLORS = {
+    Mode.INACTIVE: "#7f8c8d",
+    Mode.STATIC: "#2980b9",
+    Mode.STARTING: "#d0a020",
+    Mode.RUNNING: "#2e8b57",
+    Mode.STOPPING: "#d35400",
+}
+ROOF_COLORS = {"open": "#2e8b57", "closed": "#2980b9", "moving": "#d0a020", "error": "#c0392b"}
+
+
+def _button_stylesheet(background, extra=""):
+    return "QPushButton { background-color: %s; color: white; font-weight: bold; %s }" % (
+        background, extra)
+
+
+class _ClientProxy:
+    """Command sender for the controller; the socket lives on the window."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def _client(self):
+        client = self.window.client
+        if client is None:
+            raise ConnectionError("not connected to the indiserver")
+        return client
+
+    def new_switch(self, device, name, members):
+        self._client().new_switch(device, name, members)
+
+    def new_text(self, device, name, members):
+        self._client().new_text(device, name, members)
+
+    def new_number(self, device, name, members):
+        self._client().new_number(device, name, members)
+
+
+class _Bridge:
+    """INDI reader thread -> Qt signals."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def on_vector(self, vector):
+        self.window.vector_received.emit(vector)
+
+    def on_del_property(self, device, name):
+        self.window.property_deleted.emit(device, name)
+
+    def on_message(self, device, message):
+        self.window.message_received.emit(device, message)
+
+    def on_disconnected(self, reason):
+        self.window.disconnected_from_server.emit(reason)
+
+
+class RelayPanel(QGroupBox):
+    port_toggled = pyqtSignal(str, str, bool)
+
+    def __init__(self, alias, parent=None):
+        super().__init__(alias, parent)
+        self.alias = alias
+        self._buttons = {}
+        self._grid = QGridLayout(self)
+        self._grid.setSpacing(4)
+
+    def refresh(self, model, device, interactive):
+        ports = model.ports(device)
+        vector = model.get(device, "PORTS")
+        alert = vector is not None and vector["state"] == "IPS_ALERT"
+        if vector is None:
+            self.setTitle("%s (offline)" % device)
+        else:
+            self.setTitle("%s - %d relays%s" % (device, len(ports),
+                                                " - communication error" if alert else ""))
+        wanted = {port["name"]: port for port in ports}
+        for name in list(self._buttons):
+            if name not in wanted:
+                self._buttons[name].deleteLater()
+                del self._buttons[name]
+        for index, port in enumerate(ports):
+            button = self._buttons.get(port["name"])
+            if button is None:
+                button = QPushButton(port["label"])
+                button.setCheckable(True)
+                button.setMinimumHeight(34)
+                button.setToolTip(port["name"])
+                button.clicked.connect(
+                    lambda checked, member=port["name"]:
+                    self.port_toggled.emit(device, member, checked))
+                self._grid.addWidget(button, index // 4, index % 4)
+                self._buttons[port["name"]] = button
+            button.setText(port["label"])
+            button.setChecked(port["on"])
+            fill = "#555555" if not port["on"] else "#2e8b57"
+            if alert:
+                fill = "#c0392b"
+            button.setStyleSheet(_button_stylesheet(fill))
+            button.setEnabled(interactive and not alert)
+
+
+class RoofPanel(QGroupBox):
+    roof_open = pyqtSignal()
+    roof_close = pyqtSignal()
+    roof_stop = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__("Roll-off roof", parent)
+        layout = QVBoxLayout(self)
+        self.state_label = QLabel("offline")
+        self.state_label.setAlignment(Qt.AlignCenter)
+        self.state_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        layout.addWidget(self.state_label)
+        buttons = QHBoxLayout()
+        self.open_button = QPushButton("OPEN")
+        self.close_button = QPushButton("CLOSE")
+        self.stop_button = QPushButton("STOP")
+        self.open_button.setStyleSheet(_button_stylesheet("#2e8b57", "font-size: 12pt;"))
+        self.close_button.setStyleSheet(_button_stylesheet("#d0a020", "font-size: 12pt;"))
+        self.stop_button.setStyleSheet(_button_stylesheet("#c0392b", "font-size: 12pt;"))
+        for button in (self.open_button, self.close_button, self.stop_button):
+            button.setMinimumHeight(46)
+            buttons.addWidget(button)
+        self.open_button.clicked.connect(self.roof_open.emit)
+        self.close_button.clicked.connect(self.roof_close.emit)
+        self.stop_button.clicked.connect(self.roof_stop.emit)
+        layout.addLayout(buttons)
+        self.safety_tree = QTreeWidget()
+        self.safety_tree.setHeaderLabels(["Safety", "State"])
+        self.safety_tree.setRootIsDecorated(False)
+        self.safety_tree.setMaximumHeight(130)
+        self.safety_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.safety_tree)
+
+    def refresh(self, model, device, move_allowed, stop_allowed):
+        self.open_button.setEnabled(move_allowed)
+        self.close_button.setEnabled(move_allowed)
+        self.stop_button.setEnabled(stop_allowed)
+        if device is None or model.get(device, "DOME_SHUTTER") is None:
+            self.state_label.setText("offline")
+            self.state_label.setStyleSheet("color: %s; font-size: 18pt; font-weight: bold;"
+                                           % IPSTATE_COLORS["IPS_IDLE"])
+            self.safety_tree.clear()
+            return
+        state = model.roof_state(device)
+        color = ROOF_COLORS.get(state["state"], IPSTATE_COLORS["IPS_IDLE"])
+        self.state_label.setText(state["text"])
+        self.state_label.setStyleSheet("color: %s; font-size: 18pt; font-weight: bold;" % color)
+        lights = model.roof_safety(device)
+        self.safety_tree.clear()
+        for member, label in SAFETY_LABELS:
+            if member not in lights:
+                continue
+            item = QTreeWidgetItem([label, lights[member].replace("IPS_", "")])
+            item.setBackground(1, QColor(LIGHT_COLORS.get(lights[member], "#555555")))
+            item.setForeground(1, QColor("white"))
+            self.safety_tree.addTopLevelItem(item)
+
+
+class ChecksPanel(QGroupBox):
+    def __init__(self, parent=None):
+        super().__init__("Health checks (running mode)", parent)
+        layout = QVBoxLayout(self)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Check", "Status", "Detail"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.tree)
+
+    def refresh(self, statuses):
+        rows = {self.tree.topLevelItem(i).text(0): self.tree.topLevelItem(i)
+                for i in range(self.tree.topLevelItemCount())}
+        for name, entry in statuses.items():
+            item = rows.pop(name, None)
+            if item is None:
+                item = QTreeWidgetItem([name])
+                self.tree.addTopLevelItem(item)
+            ok = entry.get("last_ok")
+            detail = entry.get("last_message") or ""
+            if entry.get("recovering"):
+                state, color = "RECOVERING", "#d0a020"
+            elif ok is None:
+                state, color = "WAITING", "#7f8c8d"
+            elif ok:
+                state, color = "OK", "#2e8b57"
+            else:
+                state, color = "FAIL (%d)" % entry.get("failures", 0), "#c0392b"
+            item.setText(1, state)
+            item.setBackground(1, QColor(color))
+            item.setForeground(1, QColor("white"))
+            item.setText(2, detail)
+            item.setToolTip(2, detail)
+        for item in rows.values():
+            self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
+
+
+class ModePanel(QGroupBox):
+    mode_selected = pyqtSignal(str)
+    abort_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__("Operating mode", parent)
+        layout = QGridLayout(self)
+        self.big_label = QLabel(Mode.INACTIVE)
+        self.big_label.setAlignment(Qt.AlignCenter)
+        self.big_label.setStyleSheet("font-size: 22pt; font-weight: bold; color: %s;"
+                                     % MODE_COLORS[Mode.INACTIVE])
+        layout.addWidget(self.big_label, 0, 0, 1, 2)
+        self.combo = QComboBox()
+        self.apply_button = QPushButton("Apply")
+        self.apply_button.clicked.connect(
+            lambda: self.mode_selected.emit(self.combo.currentText()))
+        layout.addWidget(self.combo, 1, 0)
+        layout.addWidget(self.apply_button, 1, 1)
+        self.abort_button = QPushButton("ABORT sequence")
+        self.abort_button.setStyleSheet(_button_stylesheet("#c0392b"))
+        self.abort_button.clicked.connect(self.abort_requested.emit)
+        self.abort_button.hide()
+        layout.addWidget(self.abort_button, 2, 0, 1, 2)
+
+    def refresh(self, mode, allowed, busy):
+        self.big_label.setText(mode)
+        self.big_label.setStyleSheet("font-size: 22pt; font-weight: bold; color: %s;"
+                                     % MODE_COLORS.get(mode, "#7f8c8d"))
+        current = self.combo.currentText()
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        for option in dict.fromkeys(list(allowed) + [mode]):
+            self.combo.addItem(option)
+        if current in allowed or current == mode:
+            self.combo.setCurrentText(current)
+        else:
+            self.combo.setCurrentText(allowed[0] if allowed else mode)
+        self.combo.setEnabled(bool(allowed))
+        self.apply_button.setEnabled(bool(allowed))
+        self.combo.blockSignals(False)
+        self.abort_button.setVisible(busy)
+
+
+class ConfigPanel(QGroupBox):
+    def __init__(self, config, parent=None):
+        super().__init__("Configuration", parent)
+        layout = QFormLayout(self)
+        for key, value in config["indiserver"].items():
+            layout.addRow(QLabel("%s:" % key), QLabel(str(value)))
+        devices = ", ".join("%s=%s" % (k, v) for k, v in sorted(config["devices"].items()))
+        layout.addRow(QLabel("Devices:"), QLabel(devices))
+        hidden = ", ".join(config["relay_exclude_names"]) or "-"
+        layout.addRow(QLabel("Hidden relays:"), QLabel(hidden))
+
+
+class LogPanel(QPlainTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setMaximumBlockCount(4000)
+
+    def append(self, text):
+        self.appendPlainText(text)
+
+
+class MainWindow(QMainWindow):
+    vector_received = pyqtSignal(object)
+    property_deleted = pyqtSignal(str, str)
+    message_received = pyqtSignal(str, str)
+    disconnected_from_server = pyqtSignal(str)
+    mode_event = pyqtSignal(str, object)
+
+    def __init__(self, config, config_path):
+        super().__init__()
+        self.config = config
+        self.config_path = config_path
+        self.model = IndiModel()
+        self.client = None
+        self.controller = Controller(self.model, _ClientProxy(self), config, self.log)
+        self.controller.add_listener(self._on_controller_event)
+        self.setWindowTitle("indi-relay-boxes control")
+        self._build_menu()
+        self._build_ui()
+        self._wire()
+        self.log("config: %s" % config_path)
+        self._connect()
+
+    def _build_menu(self):
+        menu = self.menuBar().addMenu("&File")
+        reload_action = menu.addAction("Reload &config")
+        reload_action.triggered.connect(self._reload_config)
+        menu.addAction("Quit").triggered.connect(self.close)
+
+    def _build_ui(self):
+        central = QWidget()
+        layout = QHBoxLayout(central)
+        splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(splitter)
+
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        self.relay_panels = []
+        for alias in self.config["devices"]:
+            if alias == "roof":
+                continue
+            panel = RelayPanel(alias)
+            panel.port_toggled.connect(self._on_port_toggled)
+            self.relay_panels.append(panel)
+            left_layout.addWidget(panel)
+        left_layout.addWidget(ConfigPanel(self.config))
+        left_layout.addStretch(1)
+        splitter.addWidget(left)
+
+        middle = QWidget()
+        middle_layout = QVBoxLayout(middle)
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        self.roof_panel = RoofPanel()
+        self.mode_panel = ModePanel()
+        middle_layout.addWidget(self.roof_panel)
+        middle_layout.addWidget(self.mode_panel)
+        middle_layout.addStretch(1)
+        splitter.addWidget(middle)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        self.checks_panel = ChecksPanel()
+        self.log_panel = LogPanel()
+        right_layout.addWidget(self.checks_panel)
+        right_layout.addWidget(self.log_panel, 1)
+        splitter.addWidget(right)
+
+        splitter.setSizes([440, 320, 380])
+        self.setCentralWidget(central)
+
+        self.connection_label = QLabel("disconnected")
+        self.connection_label.setStyleSheet("color: #c0392b; font-weight: bold;")
+        self.reconnect_button = QPushButton("Reconnect")
+        self.reconnect_button.clicked.connect(self._connect)
+        self.statusBar().addWidget(self.connection_label)
+        self.statusBar().addWidget(self.reconnect_button)
+
+    def _wire(self):
+        self.vector_received.connect(self._on_vector)
+        self.property_deleted.connect(self._on_property_deleted)
+        self.message_received.connect(lambda dev, msg: self.log("[%s] %s" % (dev, msg)))
+        self.disconnected_from_server.connect(self._on_disconnected)
+        self.mode_event.connect(self._on_mode_event)
+        self.mode_panel.mode_selected.connect(lambda mode: self.controller.set_mode(mode))
+        self.mode_panel.abort_requested.connect(self.controller.abort_sequence)
+        self.roof_panel.roof_open.connect(self._on_roof_open)
+        self.roof_panel.roof_close.connect(self._on_roof_close)
+        self.roof_panel.roof_stop.connect(self.controller.roof_stop)
+        self._refresh_all()
+
+    def log(self, message):
+        self.log_panel.append(message)
+
+    def _connect(self):
+        if self.client is not None:
+            old, self.client = self.client, None
+            old.close()
+        host = self.config["indiserver"]["host"]
+        port = self.config["indiserver"]["port"]
+        bridge = _Bridge(self)
+        client = IndiClient(host, port,
+                            on_vector=bridge.on_vector,
+                            on_del_property=bridge.on_del_property,
+                            on_message=bridge.on_message,
+                            on_disconnected=bridge.on_disconnected)
+        try:
+            client.connect()
+        except OSError as error:
+            self.log("cannot connect to %s:%d: %s" % (host, port, error))
+            self._apply_connection_state(False, "connect failed")
+            return
+        self.client = client
+        self._apply_connection_state(True, "%s:%d" % (host, port))
+        self.log("connected to %s:%d, waiting for properties" % (host, port))
+
+    def _apply_connection_state(self, connected, text):
+        self.connection_label.setText(text)
+        color = "#2e8b57" if connected else "#c0392b"
+        self.connection_label.setStyleSheet("color: %s; font-weight: bold;" % color)
+
+    def _on_vector(self, vector):
+        self.model.apply_vector(vector)
+        self._refresh_all()
+
+    def _on_property_deleted(self, device, name):
+        self.model.remove(device, name)
+        self._refresh_all()
+
+    def _on_disconnected(self, reason):
+        self.model = IndiModel()
+        self.log("indiserver connection lost: %s" % reason)
+        self._apply_connection_state(False, "disconnected")
+        self._refresh_all()
+
+    def _on_controller_event(self, event, payload):
+        self.mode_event.emit(event, payload)
+
+    def _on_mode_event(self, event, payload):
+        if event != "mode_changed":
+            self.log("mode: %s" % payload)
+        self._refresh_all()
+
+    def _on_roof_open(self):
+        try:
+            self.controller.send_roof_motion("SHUTTER_OPEN")
+        except Exception as error:
+            self.log("roof command failed: %s" % error)
+
+    def _on_roof_close(self):
+        try:
+            self.controller.send_roof_motion("SHUTTER_CLOSE")
+        except Exception as error:
+            self.log("roof command failed: %s" % error)
+
+    def _on_port_toggled(self, device, member, on):
+        alias = next((k for k, v in self.config["devices"].items() if v == device), None)
+        self.controller.set_port(alias or device, member, on)
+        self._refresh_all()
+
+    def _refresh_all(self):
+        interactive = self.controller.relay_actions_allowed()
+        seen = set()
+        for panel in self.relay_panels:
+            device = self.config["devices"].get(panel.alias, panel.alias)
+            seen.add(device)
+            panel.refresh(self.model, device, interactive)
+        self.roof_panel.refresh(self.model, self.config["devices"].get("roof"),
+                                self.controller.roof_move_allowed(),
+                                self.controller.roof_stop_allowed())
+        self.mode_panel.refresh(self.controller.mode, self.controller.allowed_mode_changes(),
+                                self.controller.is_busy())
+        checks = self.controller.checks
+        self.checks_panel.refresh(checks.status_snapshot() if checks else {})
+
+    def _reload_config(self):
+        from . import config as config_module
+        try:
+            self.config = config_module.load(self.config_path)
+        except Exception as error:
+            self.log("config reload failed: %s" % error)
+            return
+        self.controller.config = self.config
+        self.log("config reloaded from %s" % self.config_path)
+        self._refresh_all()
+
+    def closeEvent(self, event):
+        if self.controller.mode != Mode.INACTIVE:
+            answer = QMessageBox.question(
+                self, "Still active",
+                "The operating mode is %r.\nLeave everything as it is and quit?"
+                % self.controller.mode)
+            if answer != QMessageBox.Yes:
+                event.ignore()
+                return
+        if self.controller.checks is not None:
+            self.controller.checks.stop()
+        if self.client is not None:
+            self.client.close()
+        event.accept()

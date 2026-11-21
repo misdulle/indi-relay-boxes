@@ -13,3 +13,9 @@ compile_commands.json
 # editors / IDEs
 *.swp
 *~
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/

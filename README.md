@@ -5,6 +5,8 @@ INDI drivers for network relay boxes (shared HTTP client in `common/`).
 - `relay16/` : 16-port HTTP relay box (`http://IP/ADDR/..`) -> `indi_relay16`
 - `roof/` : roll-off roof (INDI Dome) driven through the relay boxes -> `indi_roof`
 - `kmtronic8/` : KMTronic 8-channel WEB LAN relay controller -> `indi_kmtronic8`
+- `gui/` : PyQt5 control panel (relays, roof, operating modes with sequences
+  and running-mode health checks) -> see `gui/README.md`
 
 ## Build (Ubuntu 24.04, INDI 2.x from ppa:mutlaqja/ppa)
 
