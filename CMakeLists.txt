@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.16)
+project(indi-relay-boxes CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+find_package(INDI QUIET CONFIG)
+if(NOT INDI_FOUND)
+  list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake_modules)
+  find_package(INDI REQUIRED MODULE)
+endif()
+find_package(Threads REQUIRED)
+include_directories(${INDI_INCLUDE_DIR})
+
+add_subdirectory(relay16)
+add_subdirectory(kmtronic8)
+add_subdirectory(roof)

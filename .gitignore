@@ -1,0 +1,15 @@
+# out-of-source build directory (mkdir build && cd build && cmake ..)
+build/
+b/
+
+# CMake artifacts, in case cmake was ever run in the source tree
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+
+# editors / IDEs
+*.swp
+*~
