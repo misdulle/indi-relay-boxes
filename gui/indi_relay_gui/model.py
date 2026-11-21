@@ -139,6 +139,45 @@ class IndiModel:
             return {}
         return {member["name"]: member["light"] for member in vector["members"].values()}
 
+    def mount_state(self, device):
+        """Pointing of the EQMod mount: ra (hours), dec (deg), pier side,
+        parked.  None fields = not reported (yet)."""
+        if device is None:
+            return None
+        state = {"ra": None, "dec": None, "pier": None, "parked": None,
+                 "online": False}
+        for name in ("EQUATORIAL_EOD_COORD", "EQUATORIAL_COORD"):
+            coord = self.get(device, name)
+            if coord is not None:
+                state["online"] = True
+                state["ra"] = coord["members"].get("RA", {}).get("value")
+                state["dec"] = coord["members"].get("DEC", {}).get("value")
+                break
+        pier = self.get(device, "TELESCOPE_PIER_SIDE")
+        if pier is not None:
+            state["online"] = True
+            if pier["members"].get("PIER_EAST", {}).get("on"):
+                state["pier"] = "east"
+            elif pier["members"].get("PIER_WEST", {}).get("on"):
+                state["pier"] = "west"
+        park = self.get(device, "TELESCOPE_PARK")
+        if park is not None:
+            state["online"] = True
+            state["parked"] = bool(park["members"].get("PARK", {}).get("on"))
+        if state["parked"] is None and state["online"]:
+            state["parked"] = False
+        return state
+
+    def site_coords(self, device):
+        vector = self.get(device, "GEOGRAPHIC_COORD")
+        if vector is None:
+            return None
+        lat = vector["members"].get("LATITUDE", {}).get("value")
+        lon = vector["members"].get("LONGITUDE", {}).get("value")
+        if lat is None or lon is None:
+            return None
+        return {"lat": lat, "lon": lon}
+
     def port_names(self, device):
         vector = self.get(device, "PORT_NAMES")
         if vector is None:

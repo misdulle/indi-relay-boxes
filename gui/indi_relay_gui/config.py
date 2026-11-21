@@ -11,12 +11,17 @@ DEFAULT_PORT = 7624
 DEFAULTS = {
     "indiserver": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
     "devices": {"relay16": "Relay16", "kmtronic8": "KMTronic8", "roof": "eulRoof",
-                "focuser": "EulFocuser"},
+                "focuser": "EulFocuser", "mount": "EQMod Mount"},
     "relay_exclude_names": ["none"],
     "sequences": {"starting": [], "stopping": []},
     "checks": {"interval_s": 15, "grace_s": 120},
     "roof_timeout_s": 180,
+    "imu_park_quaternion": None,       # (w, x, y, z) captured parked; enables the IMU drawing
+    "imu_optical_axis": "+x",          # IMU body axis pointing along the scope tube
 }
+
+_OPTICAL_AXES = ("+x", "-x", "+y", "-y", "+z", "-z")
+
 
 DEFAULT_CONFIG_PATH = os.path.join(
     os.path.expanduser("~"), ".config", "indi-relay-boxes", "config.yaml")
@@ -49,6 +54,15 @@ def normalize(raw):
     config["sequences"] = config["sequences"] or {}
     for key in ("starting", "stopping"):
         config["sequences"][key] = _steps(config["sequences"].get(key))
+    park_quat = config.get("imu_park_quaternion")
+    if park_quat is not None:
+        if (not isinstance(park_quat, (list, tuple)) or len(park_quat) != 4):
+            raise ValueError("imu_park_quaternion: expected [w, x, y, z]")
+        config["imu_park_quaternion"] = tuple(float(v) for v in park_quat)
+    axis = config.get("imu_optical_axis", "+x") or "+x"
+    if axis not in _OPTICAL_AXES:
+        raise ValueError("imu_optical_axis: use one of %s" % ", ".join(_OPTICAL_AXES))
+    config["imu_optical_axis"] = axis
     checks = config["checks"] or {}
     config["checks"] = {
         "interval_s": max(1, int(checks.get("interval_s", DEFAULTS["checks"]["interval_s"]))),
@@ -79,6 +93,11 @@ def normalize_check(name, spec):
     elif check["kind"] == "udp":
         if not check.get("port"):
             raise ValueError("checks.%s: udp check needs a port" % name)
+        check["port"] = int(check["port"])
+        check["bind"] = str(check.get("bind", "0.0.0.0"))
+    elif check["kind"] == "quaternion":
+        if not check.get("port"):
+            raise ValueError("checks.%s: quaternion check needs a port" % name)
         check["port"] = int(check["port"])
         check["bind"] = str(check.get("bind", "0.0.0.0"))
     else:

@@ -13,6 +13,14 @@ devices:
   kmtronic8: KMTronic8
   roof: eulRoof
   focuser: EulFocuser   # publishes SCOPE_SAFETY; OPEN/CLOSE are gated on it
+  mount: EQMod Mount    # pointing (RA/DEC, pier side, park) for the scope view
+
+# Scope-visualization calibration:
+# imu_park_quaternion - the IMU reading with the mount parked (scope level,
+#   pointing south, west of the pier); all drawn angles are relative to it.
+# imu_optical_axis - which IMU body axis looks along the telescope tube.
+imu_park_quaternion: [0.108337, -0.022705, -0.081787, 0.990479]
+imu_optical_axis: +x
 
 # Relays whose displayed name (PORT_NAMES entry) matches one of these are hidden.
 relay_exclude_names: [none]
@@ -52,9 +60,10 @@ sequences:
       port: pi5
 
 # Extra health checks that run while the operating mode is "running".
-# The same monitors feed the Heartbeats panel at all times (pi5 ping, IMU
-# UDP liveness). The SCOPE_SAFETY light of EulFocuser appears as a heartbeat
-# row as well and gates the roof OPEN/CLOSE buttons.
+# The same monitors feed the Heartbeats panel at all times (pi5 ping,
+# IMU quaternion liveness on UDP 2346). The SCOPE_SAFETY light of
+# EulFocuser appears as a heartbeat row as well and gates roof OPEN/CLOSE.
+# type: quaternion also decodes each datagram for the scope position view.
 # interval_s: how often all enabled checks are evaluated.
 # grace_s:    cool-down after a recovery action before counting new failures.
 # failures:   consecutive failed evaluations before the recovery sequence runs.
@@ -74,10 +83,10 @@ checks:
         port: pi5
         seconds: 10
   imu_udp:
-    type: udp
+    type: quaternion
     enabled: true
     bind: 0.0.0.0
-    port: 9541
+    port: 2346          # the IMU broadcasts quaternions here
     timeout_s: 60
     failures: 3
     recovery:

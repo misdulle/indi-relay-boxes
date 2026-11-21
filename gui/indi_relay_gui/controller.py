@@ -370,4 +370,8 @@ class Controller:
         focuser = aliases.get("focuser")
         if focuser and self.model.get(focuser, "SCOPE_SAFETY") is None:
             missing.append(focuser)
+        mount = aliases.get("mount")
+        if mount and (self.model.get(mount, "EQUATORIAL_EOD_COORD") is None
+                      and self.model.get(mount, "TELESCOPE_PARK") is None):
+            missing.append(mount)
         return missing

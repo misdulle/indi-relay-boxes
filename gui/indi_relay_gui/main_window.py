@@ -2,13 +2,16 @@
 
 import time
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor
+import math
+
+from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QBrush, QColor, QPainter, QPen
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
+from .attitude import alt_az, angle_between, format_dec, format_ra, optical_axis
 from .controller import Controller, Mode
 from .indi import IndiClient
 from .model import IndiModel
@@ -177,6 +180,129 @@ class HeartbeatsPanel(QGroupBox):
             item.setToolTip(2, message)
         for item in rows.values():
             self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
+
+
+class ScopeCanvas(QWidget):
+    """Top view (azimuth, map convention) + side view (altitude) drawing."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(190)
+        self.data = {"mount": {}, "quat": None, "quat_age": None,
+                     "measured": None, "predicted": None, "discrepancy": None}
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        width = float(self.width())
+        height = float(self.height())
+        self._draw_top(painter, QRectF(0.0, 0.0, width / 2.0, height), self.data)
+        self._draw_side(painter, QRectF(width / 2.0, 0.0, width / 2.0, height), self.data)
+
+    def _sky_point(self, center, radius, az_deg):
+        angle = math.radians(az_deg)
+        return QPointF(center.x() + radius * math.sin(angle),
+                       center.y() - radius * math.cos(angle))
+
+    def _tube_line(self, painter, center, length, az_deg, color, dashed, width=4):
+        painter.save()
+        pen = QPen(QColor(color))
+        pen.setWidth(width)
+        pen.setStyle(Qt.DashLine if dashed else Qt.SolidLine)
+        painter.setPen(pen)
+        painter.drawLine(self._sky_point(center, -length, az_deg),
+                         self._sky_point(center, length, az_deg))
+        painter.restore()
+
+    def _draw_top(self, painter, rect, data):
+        painter.save()
+        painter.setPen(QPen(QColor("#777777")))
+        painter.drawText(rect.adjusted(8, 6, -8, -6), Qt.AlignTop | Qt.AlignLeft, "top view (az N/E/S/W)")
+        center = QPointF(rect.center().x(), rect.center().y() + 8.0)
+        radius = min(rect.width(), rect.height()) * 0.36
+        painter.setPen(QPen(QColor("#555555"), 1))
+        painter.drawEllipse(center, radius, radius)
+        painter.setPen(QPen(QColor("#777777")))
+        for az, label in ((0.0, "N"), (90.0, "E"), (180.0, "S"), (270.0, "W")):
+            painter.drawText(self._sky_point(center, radius + 12.0, az), label)
+        painter.setBrush(QBrush(QColor("#444444")))
+        painter.drawEllipse(center, 5.0, 5.0)
+        if data.get("predicted") is not None:
+            self._tube_line(painter, center, radius * 0.75, data["predicted"][0],
+                            "#3498db", dashed=True, width=3)
+        if data.get("measured") is not None:
+            self._tube_line(painter, center, radius * 0.25, data["measured"][0],
+                            "#2e8b57", dashed=False, width=4)
+        painter.restore()
+
+    def _draw_side(self, painter, rect, data):
+        painter.save()
+        painter.setPen(QPen(QColor("#777777")))
+        painter.drawText(rect.adjusted(8, 6, -8, -6), Qt.AlignTop | Qt.AlignLeft, "side view (altitude)")
+        base_y = rect.bottom() - 18.0
+        anchor = QPointF(rect.left() + 18.0, base_y)
+        painter.setPen(QPen(QColor("#555555"), 2))
+        painter.drawLine(QPointF(rect.left() + 6.0, base_y),
+                         QPointF(rect.right() - 6.0, base_y))
+        length = min(rect.width() - 40.0, (rect.height() - 40.0))
+        if data.get("predicted") is not None:
+            self._elevation_line(painter, anchor, length, data["predicted"][1],
+                                 "#3498db", dashed=True)
+        if data.get("measured") is not None:
+            self._elevation_line(painter, anchor, length, data["measured"][1],
+                                 "#2e8b57", dashed=False)
+        painter.restore()
+
+    def _elevation_line(self, painter, anchor, length, alt_deg, color, dashed):
+        painter.save()
+        pen = QPen(QColor(color))
+        pen.setWidth(4)
+        pen.setStyle(Qt.DashLine if dashed else Qt.SolidLine)
+        painter.setPen(pen)
+        angle = math.radians(max(-90.0, min(90.0, alt_deg)))
+        painter.drawLine(anchor,
+                         QPointF(anchor.x() + length * math.cos(angle),
+                                 anchor.y() - length * math.sin(angle)))
+        painter.restore()
+
+
+class ScopePanel(QGroupBox):
+    """IMU + mount visualization: azimuth / altitude pointers and readouts."""
+
+    def __init__(self, parent=None):
+        super().__init__("Scope / mount position", parent)
+        layout = QVBoxLayout(self)
+        self.readout = QLabel("")
+        self.readout.setStyleSheet("font-family: monospace; font-size: 10pt;")
+        self.readout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        layout.addWidget(self.readout)
+        self.canvas = ScopeCanvas()
+        layout.addWidget(self.canvas, 1)
+
+    def refresh(self, data):
+        self.canvas.data = dict(data)
+        self.canvas.update()
+        mount = data.get("mount") or {}
+        lines = ["mount  RA %s  DEC %s  pier %s%s" % (
+            format_ra(mount.get("ra")), format_dec(mount.get("dec")),
+            mount.get("pier") or "?",
+            "  PARKED" if mount.get("parked") else "")]
+        quat = data.get("quat")
+        if quat is not None:
+            lines.append("IMU    w %+.4f  x %+.4f  y %+.4f  z %+.4f  (%.0f s ago)"
+                         % (quat[0], quat[1], quat[2], quat[3],
+                            data.get("quat_age") or 0.0))
+        else:
+            lines.append("IMU    no quaternion (add a type: quaternion check)")
+        parts = []
+        if data.get("measured") is not None:
+            parts.append("IMU az %.0f alt %.0f" % data["measured"])
+        if data.get("predicted") is not None:
+            parts.append("mount az %.0f alt %.0f" % data["predicted"])
+        if data.get("discrepancy") is not None:
+            parts.append("difference %.1f" % data["discrepancy"])
+        lines.append("point  " + ("; ".join(parts) if parts else "waiting"))
+        self.readout.setText("\n".join(lines))
 
 
 class RoofPanel(QGroupBox):
@@ -389,7 +515,7 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         self.relay_panels = []
         for alias in self.config["devices"]:
-            if alias == "roof":
+            if alias in ("roof", "mount"):
                 continue
             panel = RelayPanel(alias)
             panel.port_toggled.connect(self._on_port_toggled)
@@ -404,9 +530,10 @@ class MainWindow(QMainWindow):
         middle_layout.setContentsMargins(0, 0, 0, 0)
         self.roof_panel = RoofPanel()
         self.mode_panel = ModePanel()
+        self.scope_panel = ScopePanel()
         middle_layout.addWidget(self.roof_panel)
         middle_layout.addWidget(self.mode_panel)
-        middle_layout.addStretch(1)
+        middle_layout.addWidget(self.scope_panel, 1)
         splitter.addWidget(middle)
 
         right = QWidget()
@@ -561,6 +688,35 @@ class MainWindow(QMainWindow):
         for name, monitor in self.controller.monitors.items():
             entries[name] = monitor.status(now)
         self.heartbeats_panel.refresh(now, entries)
+        self.scope_panel.refresh(self._scope_data(now))
+
+    def _scope_data(self, now):
+        mount_device = self.config["devices"].get("mount")
+        data = {"mount": self.model.mount_state(mount_device) or {},
+                "quat": None, "quat_age": None, "measured": None,
+                "predicted": None, "discrepancy": None}
+        monitor = None
+        for candidate in self.controller.monitors.values():
+            if getattr(candidate, "kind", "") == "quaternion":
+                monitor = candidate
+                break
+        if monitor is not None and monitor.quaternion and monitor.quaternion_at:
+            age = now - monitor.quaternion_at
+            data["quat"] = monitor.quaternion
+            data["quat_age"] = age
+            park_ref = self.config.get("imu_park_quaternion")
+            if park_ref and age < 10:
+                data["measured"] = optical_axis(
+                    data["quat"], park_ref, self.config.get("imu_optical_axis", "+x"))
+        mount = data["mount"]
+        site = self.model.site_coords(mount_device)
+        if (mount.get("ra") is not None and mount.get("dec") is not None
+                and site and (site["lat"] or site["lon"])):
+            data["predicted"] = alt_az(mount["ra"], mount["dec"],
+                                       site["lat"], site["lon"])
+        if data["measured"] is not None and data["predicted"] is not None:
+            data["discrepancy"] = angle_between(data["measured"], data["predicted"])
+        return data
 
     def _refresh_all(self):
         interactive = self.controller.relay_actions_allowed()

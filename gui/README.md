@@ -81,6 +81,11 @@ devices:               # INDI device names as reported by the drivers
   kmtronic8: KMTronic8
   roof: eulRoof
   focuser: EulFocuser  # publishes SCOPE_SAFETY; gates roof OPEN/CLOSE
+  mount: EQMod Mount   # equatorial mount: RA/DEC, pier side, park
+
+# Calibration of the scope position view (see that section below)
+imu_park_quaternion: [0.108337, -0.022705, -0.081787, 0.990479]
+imu_optical_axis: +x   # IMU body axis that looks along the tube
 
 relay_exclude_names: [none]   # relays with these PORT_NAMES are not shown
 
@@ -92,11 +97,11 @@ checks:                # monitors feed the Heartbeats panel at all times;
   interval_s: 15       #  running mode evaluates them and reacts with recoveries
   grace_s: 120         # cool-down after a recovery before failures count again
   <name>:              # any name you choose, e.g. pi5_ping / imu_udp
-    type: ping         # ping or udp
+    type: ping         # ping, udp or quaternion
     enabled: true
     host: 192.168.1.30 # ping only
-    bind: 0.0.0.0      # udp only
-    port: 9541         # udp port the IMU driver sends to
+    bind: 0.0.0.0      # udp + quaternion only
+    port: 2346         # udp port (IMU broadcasts quaternions on 2346)
     timeout_s: 60      # no data for this long = failure (udp)
     failures: 3        # consecutive failures before the recovery runs
     recovery: [...]    # sequence executed once per failure episode
@@ -124,12 +129,39 @@ from the panels.
   failures the `recovery` sequence runs (typically `relay_cycle` on the
   relay that powers the machine).
 - **udp** - listens on a UDP port and fails when no datagram arrives within
-  `timeout_s` (e.g. the IMU driver's stream); recovery power-cycles the IMU.
+  `timeout_s`
+- **quaternion** - same liveness, but each datagram must decode as an IMU
+  quaternion (format `w<w>wa<x>ab<y>bc<z>c`, e.g. the IMU broadcasting on
+  UDP 2346); staleness counts from the last *decoded* quaternion and the
+  decoded value feeds the scope position view.
 
 Both run as background monitors from GUI start (feeding the Heartbeats
 panel); in `running` mode the `CheckRunner` reuses the same monitor
 instances (one UDP socket, no double binding) and triggers recovery
 sequences when the failure threshold is reached.
+
+## Scope / mount position view
+
+The middle panel visualizes where the telescope points, live, in two
+projections: a map-style top view (azimuth, north up / east right) and a
+side view (altitude).
+
+- **Measured (green, solid)** - from the IMU quaternion broadcast (UDP,
+  `type: quaternion`). The reading is rotated against
+  `imu_park_quaternion` (a quaternion captured parked: scope level,
+  pointing south, west of the pier), so all drawn angles are relative to
+  that pose. `imu_optical_axis` says which IMU body axis looks along the
+  tube (default `+x`; flip to `-x`, `+y`... if the board is mounted
+  differently).
+- **Predicted (blue, dashed)** - from the mount: RA/Dec of the configured
+  mount device plus the site coordinates the mount driver reports
+  (`GEOGRAPHIC_COORD`), converted to topocentric azimuth/altitude.
+- The readout line shows RA/Dec, pier side, park state, the raw
+  quaternion with its age, both pointings and the difference angle
+  between them.
+
+If site coordinates are missing or zero, only the IMU pointer is drawn;
+without a quaternion check, only the readouts.
 
 ### Adding new checks
 
@@ -145,8 +177,9 @@ anything doable in a sequence can be a reaction.
       indi_relay_gui/
         indi.py          INDI client + XML stream parser
         model.py         property tree (relays, roof state, safety lights)
+        attitude.py      quaternion / sky math for the position view
         sequence.py      step engine (used by starting/stopping and recoveries)
-        checks.py        ping/udp checks + scheduler
+        checks.py        ping/udp/quaternion checks + scheduler
         controller.py    operating-mode state machine
         main_window.py   PyQt5 panels (heartbeats, relays, roof, checks, modes, log)
         main.py          entry point

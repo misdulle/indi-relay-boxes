@@ -21,7 +21,7 @@ def test_load_example_config():
     assert [s["step"] for s in config["sequences"]["starting"]][:2] == ["relay_on", "wait"]
     kinds = {c["name"]: c["kind"] for c in config["checks"]["items"]}
     assert kinds["pi5_ping"] == "ping"
-    assert kinds["imu_udp"] == "udp"
+    assert kinds["imu_udp"] == "quaternion"
     assert config["checks"]["items"][1]["recovery"][0]["step"] == "relay_cycle"
 
 
@@ -53,3 +53,29 @@ def test_missing_check_parameters_rejected():
 def test_step_without_step_key_rejected():
     with pytest.raises(ValueError):
         config_module.normalize({"sequences": {"starting": [{"seconds": 2}]}})
+
+
+def test_imu_calibration_keys_normalized():
+    config = config_module.normalize({
+        "imu_park_quaternion": [0.108337, -0.022705, -0.081787, 0.990479]})
+    assert config["imu_park_quaternion"] == (0.108337, -0.022705, -0.081787, 0.990479)
+    assert config["imu_optical_axis"] == "+x"
+    assert config["devices"]["mount"] == "EQMod Mount"
+
+
+def test_bad_imu_calibration_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"imu_park_quaternion": [1.0, 2.0]})
+    with pytest.raises(ValueError):
+        config_module.normalize({"imu_optical_axis": "+w"})
+
+
+def test_quaternion_check_parameters_validated():
+    with pytest.raises(ValueError):
+        config_module.normalize({"checks": {"q": {"type": "quaternion"}}})
+    config = config_module.normalize({
+        "checks": {"q": {"type": "quaternion", "port": 2346, "timeout_s": 15}}})
+    item = config["checks"]["items"][0]
+    assert item["kind"] == "quaternion"
+    assert item["port"] == 2346
+    assert item["bind"] == "0.0.0.0"
