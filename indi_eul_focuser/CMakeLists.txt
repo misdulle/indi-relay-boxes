@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(indi-eul-focuser CXX)
+project(indi-encoder-focuser CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,8 +17,8 @@ find_package(Threads REQUIRED)
 
 include_directories(${INDI_INCLUDE_DIR})
 
-add_executable(indi_eul_focuser eul_focuser.cpp)
-target_link_libraries(indi_eul_focuser ${INDI_DRIVER_LIBRARIES} Threads::Threads)
+add_executable(indi_encoder_focuser encoder_focuser.cpp)
+target_link_libraries(indi_encoder_focuser ${INDI_DRIVER_LIBRARIES} Threads::Threads)
 
-install(TARGETS indi_eul_focuser RUNTIME DESTINATION bin)
-install(FILES indi_eul_focuser.xml DESTINATION ${INDI_DATA_DIR})
+install(TARGETS indi_encoder_focuser RUNTIME DESTINATION bin)
+install(FILES indi_encoder_focuser.xml DESTINATION ${INDI_DATA_DIR})
