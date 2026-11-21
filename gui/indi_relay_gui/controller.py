@@ -10,7 +10,7 @@ Modes:
 
 import threading
 
-from .checks import CheckRunner
+from .checks import CheckRunner, build_monitors
 from .sequence import SequenceRunner, StepContext
 
 
@@ -36,6 +36,48 @@ class Controller:
         self._abort_event = threading.Event()
         self._guard = threading.Lock()
         self.checks = None
+        self.monitors = build_monitors(config["checks"])
+        self.connected_devices = set()
+        for monitor in self.monitors.values():
+            monitor.start()
+
+    def ensure_device_connected(self, device):
+        """Send CONNECTION/CONNECT to each configured driver the first time the
+        indiserver reports one of its properties. getProperties alone only
+        lists the drivers; every device must be switched on explicitly."""
+        if (device not in self.config["devices"].values()
+                or device in self.connected_devices):
+            return
+        self.connected_devices.add(device)
+        try:
+            self.client.new_switch(device, "CONNECTION", [("CONNECT", True)])
+            self.log("%s: connecting" % device)
+        except Exception as error:
+            self.log("%s: connect failed: %s" % (device, error))
+            self.connected_devices.discard(device)
+
+    def forget_device(self, device, name="CONNECTION"):
+        if name == "CONNECTION":
+            self.connected_devices.discard(device)
+
+    def shutdown(self):
+        self._stop_checks()
+        for monitor in self.monitors.values():
+            monitor.stop()
+
+    def scope_safe(self):
+        """True when the EulFocuser driver reports SCOPE_SAFETY/SAFE ok.
+        No data (stale or offline focuser) counts as NOT safe."""
+        focuser = self.config["devices"].get("focuser")
+        if focuser:
+            vector = self.model.get(focuser, "SCOPE_SAFETY")
+            if vector is not None:
+                return vector["members"].get("SAFE", {}).get("light") == "IPS_OK"
+        roof = self.config["devices"].get("roof")
+        vector = self.model.get(roof, "ROOF_SAFETY_STATUS")
+        if vector is not None:
+            return vector["members"].get("IMU_SAFE", {}).get("light") == "IPS_OK"
+        return False
 
     def add_listener(self, listener):
         self.listeners.append(listener)
@@ -208,7 +250,8 @@ class Controller:
                 self.config["checks"],
                 sequence_steps_for=self._steps_for_check,
                 ctx_factory=lambda: self._make_ctx(threading.Event()),
-                log=self.log)
+                log=self.log,
+                monitors=self.monitors)
             self.checks.start()
         except Exception as error:
             self.log("cannot start checks: %s" % error)
@@ -226,14 +269,17 @@ class Controller:
             self.checks = None
 
     def devices_ready(self):
-        relay16 = self.config["devices"].get("relay16")
-        kmtronic8 = self.config["devices"].get("kmtronic8")
-        roof = self.config["devices"].get("roof")
         missing = []
+        aliases = self.config["devices"]
+        roof = aliases.get("roof")
         if self.model.get(roof, "DOME_SHUTTER") is None and self.model.get(roof, "DOME_PARK") is None:
             missing.append(roof)
         known = set(self.model.relay_devices())
-        for alias, device in (("relay16", relay16), ("kmtronic8", kmtronic8)):
+        for alias in ("relay16", "kmtronic8"):
+            device = aliases.get(alias)
             if device is not None and device not in known:
                 missing.append(device)
+        focuser = aliases.get("focuser")
+        if focuser and self.model.get(focuser, "SCOPE_SAFETY") is None:
+            missing.append(focuser)
         return missing

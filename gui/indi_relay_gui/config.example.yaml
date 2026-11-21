@@ -6,10 +6,13 @@ indiserver:
   port: 7624
 
 # INDI device names as reported by the drivers (INDI driver "name").
+# The GUI switches every driver on (CONNECTION/CONNECT) as soon as the
+# indiserver announces it.
 devices:
   relay16: Relay16
   kmtronic8: KMTronic8
   roof: eulRoof
+  focuser: EulFocuser   # publishes SCOPE_SAFETY; OPEN/CLOSE are gated on it
 
 # Relays whose displayed name (PORT_NAMES entry) matches one of these are hidden.
 relay_exclude_names: [none]
@@ -49,6 +52,9 @@ sequences:
       port: pi5
 
 # Extra health checks that run while the operating mode is "running".
+# The same monitors feed the Heartbeats panel at all times (pi5 ping, IMU
+# UDP liveness). The SCOPE_SAFETY light of EulFocuser appears as a heartbeat
+# row as well and gates the roof OPEN/CLOSE buttons.
 # interval_s: how often all enabled checks are evaluated.
 # grace_s:    cool-down after a recovery action before counting new failures.
 # failures:   consecutive failed evaluations before the recovery sequence runs.

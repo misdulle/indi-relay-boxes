@@ -1,8 +1,9 @@
 # indi-relay-boxes GUI
 
 PyQt5 control panel for the relay boxes and the roll-off roof driven by the
-drivers in this repository (`Relay16`, `KMTronic8`, `eulRoof`). It speaks the
-INDI XML protocol directly over TCP - no libindi/python bindings needed.
+drivers in this repository (`Relay16`, `KMTronic8`, `eulRoof`, `EulFocuser`).
+It speaks the INDI XML protocol directly over TCP - no libindi/python bindings
+needed.
 
 ## Install
 
@@ -32,6 +33,36 @@ answers STOP immediately, whatever its internal state) and is enabled in every
 mode except `inactive`. During a sequence, **ABORT sequence** cancels the
 remaining steps and returns to `inactive` without switching anything off.
 
+## Device connection
+
+Connecting to the indiserver only lists the running drivers - it does not
+switch them on. The GUI therefore sends `CONNECTION / CONNECT` to every
+device listed under `devices:` as soon as the indiserver announces one of
+its properties, and remembers which drivers it already switched on (a driver
+restart triggers a new CONNECT).
+
+## Roof buttons and safety
+
+OPEN / CLOSE / STOP are push buttons, not toggles: pressing one sends a single
+`DOME_SHUTTER` (or `DOME_ABORT_MOTION`) command which the roof driver uses as a
+500 ms pulse on the corresponding relay; the driver handles the pulse-on,
+pulse-off timing itself. The GUI sends one command per click and displays the
+resulting shutter state reported by the driver.
+
+OPEN and CLOSE are only clickable when the scope is **safe**, i.e. the
+`EulFocuser` driver reports `SCOPE_SAFETY / SAFE` = Ok. If the focuser is not
+data, the roof driver's `IMU_SAFE` light is used as a fallback; no data at all
+counts as *not safe*. The current safety state is shown in the roof panel's
+safety list.
+
+## Heartbeats panel
+
+The top panel shows a continuously updating clock plus one liveness row per
+watched source: the indiserver link, `SCOPE_SAFETY` freshness (EulFocuser,
+refreshed every second by the driver), and every enabled monitor from the
+`checks:` section (pi5 ping, IMU UDP, ...). Rows turn green when alive, red
+when stale, and grey while waiting for the first data after start.
+
 ## Configuration reference
 
 ```yaml
@@ -43,6 +74,7 @@ devices:               # INDI device names as reported by the drivers
   relay16: Relay16
   kmtronic8: KMTronic8
   roof: eulRoof
+  focuser: EulFocuser  # publishes SCOPE_SAFETY; gates roof OPEN/CLOSE
 
 relay_exclude_names: [none]   # relays with these PORT_NAMES are not shown
 
@@ -50,10 +82,10 @@ sequences:             # see "Step vocabulary" below
   starting: [...]
   stopping: [...]
 
-checks:                # only active in running mode
-  interval_s: 15       # evaluation period
+checks:                # monitors feed the Heartbeats panel at all times;
+  interval_s: 15       #  running mode evaluates them and reacts with recoveries
   grace_s: 120         # cool-down after a recovery before failures count again
-  <name>:
+  <name>:              # any name you choose, e.g. pi5_ping / imu_udp
     type: ping         # ping or udp
     enabled: true
     host: 192.168.1.30 # ping only
@@ -88,10 +120,16 @@ from the panels.
 - **udp** - listens on a UDP port and fails when no datagram arrives within
   `timeout_s` (e.g. the IMU driver's stream); recovery power-cycles the IMU.
 
+Both run as background monitors from GUI start (feeding the Heartbeats
+panel); in `running` mode the `CheckRunner` reuses the same monitor
+instances (one UDP socket, no double binding) and triggers recovery
+sequences when the failure threshold is reached.
+
 ### Adding new checks
 
-Add a class with `run_check(now) -> (ok, message)` plus `start()`/`stop()`
-to `indi_relay_gui/checks.py`, register it in `RUNNERS`, and configure a
+Add a class to `indi_relay_gui/checks.py` with `run_check(now) ->
+(ok, message)`, `status(now) -> {ok, known, age, message}` and
+`start()`/`stop()`, register it in the `FACTORIES` dict, and configure a
 block under `checks:`. Recovery actions reuse the full step vocabulary, so
 anything doable in a sequence can be a reaction.
 
@@ -104,7 +142,7 @@ anything doable in a sequence can be a reaction.
         sequence.py      step engine (used by starting/stopping and recoveries)
         checks.py        ping/udp checks + scheduler
         controller.py    operating-mode state machine
-        main_window.py   PyQt5 panels (relays, roof, checks, modes, log)
+        main_window.py   PyQt5 panels (heartbeats, relays, roof, checks, modes, log)
         main.py          entry point
         config.example.yaml
       tests/             pytest suite (python3 -m pytest tests)

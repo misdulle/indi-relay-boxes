@@ -21,7 +21,14 @@ class FakeClient:
         pass
 
 
-def make_model():
+def add_light(model, device, name, member, text):
+    model.apply_vector(vector_from_element(ET.fromstring(
+        '<defLightVector device="%s" name="%s" state="%s">'
+        '<defLight name="%s">%s</defLight></defLightVector>'
+        % (device, name, text, member, text))))
+
+
+def make_model(scope_safety="Ok", imu_safe=None):
     model = IndiModel()
     members = "".join(
         '<defSwitch name="PORT%02d" label="%s">Off</defSwitch>' % (index + 1, label)
@@ -34,6 +41,10 @@ def make_model():
         '<defSwitch name="SHUTTER_OPEN">Off</defSwitch>'
         '<defSwitch name="SHUTTER_CLOSE">On</defSwitch>'
         "</defSwitchVector>")))
+    if scope_safety is not None:
+        add_light(model, "EulFocuser", "SCOPE_SAFETY", "SAFE", scope_safety)
+    if imu_safe is not None:
+        add_light(model, "eulRoof", "ROOF_SAFETY_STATUS", "IMU_SAFE", imu_safe)
     model.roof_state = lambda device: {"text": "closed", "state": "closed",
                                        "busy": False, "members": {}}
     return model
@@ -42,7 +53,8 @@ def make_model():
 def make_config(starting=None, stopping=None):
     return {
         "indiserver": {"host": "127.0.0.1", "port": 7624},
-        "devices": {"relay16": "Relay16", "kmtronic8": "KMTronic8", "roof": "eulRoof"},
+        "devices": {"relay16": "Relay16", "kmtronic8": "KMTronic8", "roof": "eulRoof",
+                    "focuser": "EulFocuser"},
         "relay_exclude_names": ["none"],
         "sequences": {"starting": starting or [], "stopping": stopping or []},
         "checks": {"interval_s": 15, "grace_s": 0, "items": []},
@@ -159,3 +171,45 @@ def test_devices_ready_lists_missing_devices():
     assert "Relay16" in missing
     assert "KMTronic8" not in missing
     assert "eulRoof" not in missing
+    assert "EulFocuser" not in missing
+
+
+def test_ensure_device_connected_sends_connect_once_per_device():
+    controller, events, client, log = make_controller()
+    assert client.switches == []
+    controller.ensure_device_connected("EulFocuser")
+    assert client.switches == [("EulFocuser", "CONNECTION", [("CONNECT", True)])]
+    controller.ensure_device_connected("EulFocuser")
+    assert len(client.switches) == 1
+    controller.ensure_device_connected("NotAConfiguredDevice")
+    assert len(client.switches) == 1
+
+
+def test_forget_device_allows_reconnect():
+    controller, events, client, log = make_controller()
+    controller.ensure_device_connected("EulFocuser")
+    controller.forget_device("EulFocuser", "DEF_SWITCH")
+    controller.ensure_device_connected("EulFocuser")
+    assert len(client.switches) == 1
+    controller.forget_device("EulFocuser")
+    controller.ensure_device_connected("EulFocuser")
+    assert len(client.switches) == 2
+
+
+def test_scope_safe_from_focuser_safety_light():
+    controller, events, client, log = make_controller()
+    assert controller.scope_safe() is True
+    add_light(controller.model, "EulFocuser", "SCOPE_SAFETY", "SAFE", "Alert")
+    assert controller.scope_safe() is False
+
+
+def test_scope_safe_falls_back_to_roof_imu():
+    model = make_model(scope_safety=None, imu_safe="Ok")
+    controller = Controller(model, FakeClient(), make_config(), lambda *_: None)
+    assert controller.scope_safe() is True
+
+
+def test_scope_safe_defaults_to_false_without_data():
+    model = make_model(scope_safety=None, imu_safe=None)
+    controller = Controller(model, FakeClient(), make_config(), lambda *_: None)
+    assert controller.scope_safe() is False

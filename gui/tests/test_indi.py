@@ -47,6 +47,19 @@ def test_parse_number_vector():
     assert member["min"] == 5.0 and member["max"] == 600.0
 
 
+def test_light_members_normalized():
+    vector = vector_from_element(ET.fromstring(
+        '<setLightVector device="EulFocuser" name="SCOPE_SAFETY" state="Ok">'
+        '<oneLight name="SAFE">Ok</oneLight>'
+        "</setLightVector>"))
+    assert vector["members"]["SAFE"]["light"] == "IPS_OK"
+    vector = vector_from_element(ET.fromstring(
+        '<setLightVector device="EulFocuser" name="SCOPE_SAFETY" state="Idle">'
+        '<oneLight name="SAFE">Alert</oneLight>'
+        "</setLightVector>"))
+    assert vector["members"]["SAFE"]["light"] == "IPS_ALERT"
+
+
 def test_stream_parser_reassembles_fragments():
     received = []
     parser = StreamParser(received.append)

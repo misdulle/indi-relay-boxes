@@ -9,6 +9,7 @@ import pytest
 def mock_qt(monkeypatch):
     qtcore = types.ModuleType("PyQt5.QtCore")
     qtcore.Qt = MagicMock()
+    qtcore.QTimer = MagicMock()
     qtcore.pyqtSignal = lambda *args: MagicMock()
     qtgui = types.ModuleType("PyQt5.QtGui")
     qtgui.QColor = MagicMock()

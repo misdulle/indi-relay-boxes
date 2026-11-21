@@ -1,6 +1,8 @@
 """PyQt5 user interface for the observatory relay / roof manager."""
 
-from PyQt5.QtCore import Qt, pyqtSignal
+import time
+
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
@@ -130,6 +132,53 @@ class RelayPanel(QGroupBox):
             button.setEnabled(interactive and not alert)
 
 
+class HeartbeatsPanel(QGroupBox):
+    """Clock plus liveness indicators (indiserver, SCOPE_SAFETY, pi5, IMU)."""
+
+    def __init__(self, parent=None):
+        super().__init__("Heartbeats", parent)
+        layout = QVBoxLayout(self)
+        self.clock_label = QLabel("--:--:--")
+        self.clock_label.setAlignment(Qt.AlignCenter)
+        self.clock_label.setStyleSheet("font-size: 16pt; font-family: monospace; font-weight: bold;")
+        layout.addWidget(self.clock_label)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Source", "State", "Detail"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.tree)
+
+    def refresh(self, now, entries):
+        self.clock_label.setText(time.strftime("%Y-%m-%d %H:%M:%S"))
+        wanted = {}
+        for name, entry in entries.items():
+            message = entry.get("message", "")
+            age = entry.get("age")
+            if age is not None:
+                message = "%s (last update %.0f s ago)" % (message, min(999, age))
+            wanted[name] = (entry.get("ok", False), entry.get("known", False), message)
+        rows = {self.tree.topLevelItem(i).text(0): self.tree.topLevelItem(i)
+                for i in range(self.tree.topLevelItemCount())}
+        for name, (ok, known, message) in wanted.items():
+            item = rows.pop(name, None)
+            if item is None:
+                item = QTreeWidgetItem([name])
+                self.tree.addTopLevelItem(item)
+            if ok:
+                state, color = "ALIVE", "#2e8b57"
+            elif known:
+                state, color = "STALE", "#c0392b"
+            else:
+                state, color = "WAITING", "#7f8c8d"
+            item.setText(1, state)
+            item.setBackground(1, QColor(color))
+            item.setForeground(1, QColor("white"))
+            item.setText(2, message)
+            item.setToolTip(2, message)
+        for item in rows.values():
+            self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
+
+
 class RoofPanel(QGroupBox):
     roof_open = pyqtSignal()
     roof_close = pyqtSignal()
@@ -163,9 +212,9 @@ class RoofPanel(QGroupBox):
         self.safety_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.safety_tree)
 
-    def refresh(self, model, device, move_allowed, stop_allowed):
-        self.open_button.setEnabled(move_allowed)
-        self.close_button.setEnabled(move_allowed)
+    def refresh(self, model, device, move_allowed, stop_allowed, scope_safe=False):
+        self.open_button.setEnabled(move_allowed and scope_safe)
+        self.close_button.setEnabled(move_allowed and scope_safe)
         self.stop_button.setEnabled(stop_allowed)
         if device is None or model.get(device, "DOME_SHUTTER") is None:
             self.state_label.setText("offline")
@@ -179,6 +228,11 @@ class RoofPanel(QGroupBox):
         self.state_label.setStyleSheet("color: %s; font-size: 18pt; font-weight: bold;" % color)
         lights = model.roof_safety(device)
         self.safety_tree.clear()
+        safety = "ok" if scope_safe else "not safe"
+        scope_item = QTreeWidgetItem(["Scope safety", safety])
+        scope_item.setBackground(1, QColor("#2e8b57" if scope_safe else "#c0392b"))
+        scope_item.setForeground(1, QColor("white"))
+        self.safety_tree.addTopLevelItem(scope_item)
         for member, label in SAFETY_LABELS:
             if member not in lights:
                 continue
@@ -305,6 +359,9 @@ class MainWindow(QMainWindow):
         self.client = None
         self.controller = Controller(self.model, _ClientProxy(self), config, self.log)
         self.controller.add_listener(self._on_controller_event)
+        self._last_server_rx = time.time()
+        self._safety_rx = None
+        self._safety_ok = False
         self.setWindowTitle("indi-relay-boxes control")
         self._build_menu()
         self._build_ui()
@@ -352,11 +409,17 @@ class MainWindow(QMainWindow):
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        self.heartbeats_panel = HeartbeatsPanel()
         self.checks_panel = ChecksPanel()
         self.log_panel = LogPanel()
+        right_layout.addWidget(self.heartbeats_panel)
         right_layout.addWidget(self.checks_panel)
         right_layout.addWidget(self.log_panel, 1)
         splitter.addWidget(right)
+
+        self._ticker = QTimer(self)
+        self._ticker.timeout.connect(self._tick)
+        self._ticker.start(500)
 
         splitter.setSizes([440, 320, 380])
         self.setCentralWidget(central)
@@ -412,15 +475,24 @@ class MainWindow(QMainWindow):
         self.connection_label.setStyleSheet("color: %s; font-weight: bold;" % color)
 
     def _on_vector(self, vector):
+        self._last_server_rx = time.time()
+        self.controller.ensure_device_connected(vector.get("device", ""))
+        if vector.get("name") == "SCOPE_SAFETY":
+            self._safety_rx = time.time()
+            self._safety_ok = (vector["members"].get("SAFE", {}).get("light") == "IPS_OK")
         self.model.apply_vector(vector)
         self._refresh_all()
 
     def _on_property_deleted(self, device, name):
         self.model.remove(device, name)
+        self.controller.forget_device(device, name)
         self._refresh_all()
 
     def _on_disconnected(self, reason):
         self.model = IndiModel()
+        self.controller.connected_devices.clear()
+        self._safety_rx = None
+        self._safety_ok = False
         self.log("indiserver connection lost: %s" % reason)
         self._apply_connection_state(False, "disconnected")
         self._refresh_all()
@@ -450,6 +522,29 @@ class MainWindow(QMainWindow):
         self.controller.set_port(alias or device, member, on)
         self._refresh_all()
 
+    def _tick(self):
+        now = time.time()
+        entries = {}
+        connected = self.client is not None
+        server_age = now - self._last_server_rx
+        entries["indiserver"] = {
+            "ok": connected and server_age < 30,
+            "known": connected,
+            "age": server_age if connected else None,
+            "message": "INDI server messages"}
+        if self._safety_rx is not None:
+            entries["SCOPE_SAFETY"] = {
+                "ok": self._safety_ok and (now - self._safety_rx) < 5,
+                "known": True,
+                "age": now - self._safety_rx,
+                "message": "scope safety (EulFocuser)"}
+        else:
+            entries["SCOPE_SAFETY"] = {"ok": False, "known": False, "age": None,
+                                       "message": "no SCOPE_SAFETY update yet"}
+        for name, monitor in self.controller.monitors.items():
+            entries[name] = monitor.status(now)
+        self.heartbeats_panel.refresh(now, entries)
+
     def _refresh_all(self):
         interactive = self.controller.relay_actions_allowed()
         seen = set()
@@ -459,7 +554,8 @@ class MainWindow(QMainWindow):
             panel.refresh(self.model, device, interactive)
         self.roof_panel.refresh(self.model, self.config["devices"].get("roof"),
                                 self.controller.roof_move_allowed(),
-                                self.controller.roof_stop_allowed())
+                                self.controller.roof_stop_allowed(),
+                                scope_safe=self.controller.scope_safe())
         self.mode_panel.refresh(self.controller.mode, self.controller.allowed_mode_changes(),
                                 self.controller.is_busy())
         checks = self.controller.checks
@@ -485,8 +581,7 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.Yes:
                 event.ignore()
                 return
-        if self.controller.checks is not None:
-            self.controller.checks.stop()
+        self.controller.shutdown()
         if self.client is not None:
             self.client.close()
         event.accept()

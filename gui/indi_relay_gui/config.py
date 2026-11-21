@@ -10,7 +10,8 @@ DEFAULT_PORT = 7624
 
 DEFAULTS = {
     "indiserver": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
-    "devices": {"relay16": "Relay16", "kmtronic8": "KMTronic8", "roof": "eulRoof"},
+    "devices": {"relay16": "Relay16", "kmtronic8": "KMTronic8", "roof": "eulRoof",
+                "focuser": "EulFocuser"},
     "relay_exclude_names": ["none"],
     "sequences": {"starting": [], "stopping": []},
     "checks": {"interval_s": 15, "grace_s": 120},

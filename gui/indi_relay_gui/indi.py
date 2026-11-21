@@ -16,6 +16,9 @@ TEXT_VECTOR = "TextVector"
 NUMBER_VECTOR = "NumberVector"
 LIGHT_VECTOR = "LightVector"
 
+_LIGHT_STATES = {"ok": "IPS_OK", "idle": "IPS_IDLE", "alert": "IPS_ALERT",
+                 "busy": "IPS_BUSY"}
+
 _LT = ord("<")
 _GT = ord(">")
 _QUOTES = (ord("\""), ord("'"))
@@ -67,7 +70,8 @@ def vector_from_element(elem):
             for attr in ("min", "max", "step"):
                 member[attr] = float(child.get(attr, 0))
         else:
-            member["light"] = child.get("state") or (child.text or "").strip() or "IPS_IDLE"
+            value = child.get("state") or (child.text or "").strip() or "IPS_IDLE"
+            member["light"] = _LIGHT_STATES.get(value.lower(), value)
         vec["members"][member["name"]] = member
     return vec
 
