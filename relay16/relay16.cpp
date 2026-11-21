@@ -17,7 +17,7 @@ Relay16Box::Relay16Box()
 
 const char *Relay16Box::getDefaultName()
 {
-    return "16 Port Relay Box";
+    return "Relay16";
 }
 
 bool Relay16Box::initProperties()

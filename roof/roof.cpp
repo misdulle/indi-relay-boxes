@@ -46,7 +46,7 @@ RollOffRoof::~RollOffRoof()
 
 const char *RollOffRoof::getDefaultName()
 {
-    return "Roll Off Roof";
+    return "eulRoof";
 }
 
 bool RollOffRoof::initProperties()

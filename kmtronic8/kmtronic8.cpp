@@ -18,7 +18,7 @@ KMTronic8::KMTronic8()
 
 const char *KMTronic8::getDefaultName()
 {
-    return "KMTronic 8 Relay LAN";
+    return "KMTronic8";
 }
 
 bool KMTronic8::initProperties()
