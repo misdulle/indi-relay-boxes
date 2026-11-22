@@ -106,30 +106,30 @@ def test_tube_direction_unknown():
 def test_gem_structure_pillar_ra_bar_dec_bar_tube():
     figure = mount3d.build_figure(
         {"az": 90.0, "alt": 0.0},                           # pointing east
-        {"lat": 42.5, "lon": 0.0})
+        {"lat": 47.5, "lon": 0.0})
     by_width = {}
     for seg in figure["segments"]:
         by_width.setdefault(seg["width"], []).append(seg)
     pier = by_width[15][0]
     assert pier["a"] == (0.0, 0.0, 0.0)
-    assert pier["b"] == (0.0, 0.0, 1.0)
+    assert pier["b"] == (0.0, 0.0, mount3d.PIER_HEIGHT)
     ra_bar = by_width[14][0]
-    pole = mount3d.celestial_pole(42.5)
-    tilt = math.degrees(math.acos(pole[2]))
-    assert abs(tilt - 47.5) < 0.1         # 90 - latitude from the vertical
+    pole = mount3d.celestial_pole(47.5)
+    elevation = math.degrees(math.asin(pole[2]))
+    assert abs(elevation - 47.5) < 0.1    # inclined 47.5 from the HORIZONTAL
     midpoint = mount3d.vec_scale(mount3d.vec_add(ra_bar["a"], ra_bar["b"]), 0.5)
-    assert midpoint == (0.0, 0.0, 1.0)      # centred on the pier top
+    assert midpoint == (0.0, 0.0, mount3d.PIER_HEIGHT)   # centred on the pier top
     assert abs(mount3d.vec_norm(mount3d.vec_sub(ra_bar["b"], ra_bar["a"]))
                - mount3d.RA_LENGTH) < EPS
     assert abs(mount3d.vec_dot(
         mount3d.vec_unit(mount3d.vec_sub(ra_bar["b"], ra_bar["a"])), pole) - 1.0) < EPS
     dec_bar = by_width[11][0]
     dec_dir = mount3d.vec_unit(mount3d.vec_sub(dec_bar["b"], dec_bar["a"]))
-    assert abs(mount3d.vec_dot(dec_dir, pole)) < EPS       # perpendicular to RA
+    assert abs(mount3d.vec_dot(dec_dir, pole)) < EPS       # 90 deg from polar axis
     assert abs(mount3d.vec_norm(mount3d.vec_sub(dec_bar["b"], dec_bar["a"]))
                - (mount3d.SADDLE_OFFSET + mount3d.DEC_BACK)) < EPS
     # the bar runs from head - DEC_BACK (counterweight side) to the saddle
-    head0 = (0.0, 0.0, 1.0)
+    head0 = (0.0, 0.0, mount3d.PIER_HEIGHT)
     assert abs(mount3d.vec_norm(mount3d.vec_sub(dec_bar["a"], head0))
                - mount3d.DEC_BACK) < EPS
     saddle_offset_vec = mount3d.vec_sub(dec_bar["b"], head0)
@@ -149,8 +149,8 @@ def test_gem_structure_pillar_ra_bar_dec_bar_tube():
     tail, tip = along[0][1], along[-1][1]
     assert abs(mount3d.vec_norm(mount3d.vec_sub(tip, tail))
                - 2.0 * mount3d.TUBE_HALF) < EPS
-    head = (0.0, 0.0, 1.0)
-    # the tube centreline is attached at the end of the DEC bar
+    head = (0.0, 0.0, mount3d.PIER_HEIGHT)
+    # the tube centreline is attached at the saddle, 40 cm out on the DEC axis
     dec_tip = mount3d.vec_add(head, mount3d.vec_scale(dec_dir, mount3d.SADDLE_OFFSET))
     dec_back = mount3d.vec_sub(head, mount3d.vec_scale(dec_dir, mount3d.DEC_BACK))
     tube_mid = mount3d.vec_scale(mount3d.vec_add(tail, tip), 0.5)

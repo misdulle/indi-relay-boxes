@@ -12,8 +12,8 @@ RA_COLOR = "#8e44ad"     # polar (hour angle) axis
 DEC_COLOR = "#1565c0"    # declination axis
 TUBE_COLOR = "#2e8b57"
 
-PIER_HEIGHT = 1.0     # m, pier top above ground
-RA_LENGTH = 0.50      # m, polar (hour angle) bar, pointing at the NCP
+PIER_HEIGHT = 0.80    # m, vertical pier
+RA_LENGTH = 0.40      # m, polar (hour angle) bar, pointing at the NCP
 DEC_BACK = 0.15       # m, DEC bar extends this far on the counterweight side
 SADDLE_OFFSET = 0.40  # m, tube attachment offset along the DEC axis
 TUBE_HALF = 0.55      # m, half length of the drawn tube

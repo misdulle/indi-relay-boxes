@@ -266,21 +266,21 @@ is drawn as a larger stick figure (orthographic, no GPU/3D library),
 oriented by angles, each part in its own color (pier sienna, polar axis
 purple, DEC axis blue, tube green):
 
-- the **pillar** stands at the origin;
+- the **pillar** (80 cm, vertical) stands at the origin;
 - on top of the pillar, the **polar (hour angle) axis** is drawn as a
-  500 mm bar pointing at the celestial pole - its angle to the vertical
-  is 90° minus the site latitude the mount reports (`GEOGRAPHIC_COORD`),
-  e.g. 47.5° at latitude 42.5°N;
+  40 cm bar pointing at the celestial pole, fixed orientation - its
+  inclination is the site latitude the mount reports
+  (`GEOGRAPHIC_COORD`), e.g. 47.5° from the **horizontal** at
+  latitude 47.5°N;
 - the **DEC axis** is exactly 90° from the polar axis (verified by
   re-orthogonalization even in degenerate cases) and its rotation about
   the polar axis follows the pointing; `TELESCOPE_PIER_SIDE` flips it so
   the saddle sits on the real scope side of the pier (west of the pier
   when parked, if PIER_WEST);
-- the **tube** is attached to the DEC axis offset by `SADDLE_OFFSET` =
-  0.40 m along it (so it sits beside, not on, the polar axis) and stays
-  perpendicular to the DEC axis, rotating about it; its direction uses (in
-  order of preference) `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site
-  coordinates,
+- the **tube** lies perpendicular to the DEC axis, at `SADDLE_OFFSET` =
+  0.40 m from the polar-axis/DEC-axis intersection, and rotates about the
+  DEC axis; its direction uses (in order of preference)
+  `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates,
   then the parked pose (horizontal, pointing south) when
   `TELESCOPE_PARK.PARK` is on; it is drawn **telescopic** (three sections,
   widening towards the front), the front lens is materialized as a filled
@@ -302,7 +302,8 @@ purple, DEC axis blue, tube green):
 where you look at the mount); 200/25 gives a south-eastern, slightly
 raised viewpoint matching the shed orientation. Tuning the stick lengths
 is a matter of editing the constants at the top of
-`indi_relay_gui/mount3d.py`.
+`indi_relay_gui/mount3d.py` (`PIER_HEIGHT` 0.8 m, `RA_LENGTH` 0.4 m,
+`SADDLE_OFFSET` 0.4 m, `TUBE_HALF`, ...).
 
 ## Shed camera
 
