@@ -280,7 +280,9 @@ oriented by angles:
 - **Orbiting the view** - right-click-drag on the 2D projections or on the
   3D figure itself: horizontal movement swings the 3D camera azimuth,
   vertical movement changes its altitude. The result updates `mount3d_view`
-  in memory until the next config reload (the yaml keeps the start values).
+  in memory until the next config reload (the yaml keeps the start values);
+  **double-click** on the 3D figure resets the angles to the `mount3d_view`
+  values from the config file.
 - **Auto-scaling** - the figure is zoomed to fill the panel at any size, so
   resizing the splitter window changes only its pixel size.
 

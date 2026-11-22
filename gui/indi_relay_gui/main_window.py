@@ -418,11 +418,13 @@ class ScopePanel(QGroupBox):
 class Mount3DCanvas(QWidget):
     """Simple orthographic 3D stick figure of the german equatorial mount.
 
-    Right-drag orbits the viewpoint (view_orbit: daz, dalt in degrees).
+    Right-drag orbits the viewpoint (view_orbit: daz, dalt in degrees);
+    double-click asks for a reset to the config values (view_reset).
     The figure is auto-scaled to fill the available area.
     """
 
     view_orbit = pyqtSignal(float, float)
+    view_reset = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -460,6 +462,13 @@ class Mount3DCanvas(QWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.view_reset.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def _fit(self, rect, view_az, view_alt):
         """scale/center so the figure fills the widget."""
@@ -899,6 +908,7 @@ class MainWindow(QMainWindow):
         self.mode_event.connect(self._on_mode_event)
         self.scope_panel.orbit_requested.connect(self._orbit_3d)
         self.mount3d_panel.view_orbit.connect(self._orbit_3d)
+        self.mount3d_panel.view_reset.connect(self._reset_3d)
         self.mode_panel.mode_selected.connect(lambda mode: self.controller.set_mode(mode))
         self.mode_panel.abort_requested.connect(self.controller.abort_sequence)
         self.roof_panel.roof_open.connect(self._on_roof_open)
@@ -1080,6 +1090,17 @@ class MainWindow(QMainWindow):
         if data["measured"] is not None and data["predicted"] is not None:
             data["discrepancy"] = angle_between(data["measured"], data["predicted"])
         return data
+
+    def _reset_3d(self):
+        from . import config as config_module
+        try:
+            fresh = config_module.load(self.config_path)
+        except Exception as error:
+            self.log("3d view reset failed: %s" % error)
+            return
+        self.config["mount3d_view"] = fresh["mount3d_view"]
+        self.log("3d view reset to config angles")
+        self._refresh_scope(time.time())
 
     def _orbit_3d(self, daz, dalt):
         view = self.config.setdefault(
