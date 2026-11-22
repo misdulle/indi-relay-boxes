@@ -122,13 +122,11 @@ class RelayPanel(QGroupBox):
                 button = QPushButton(port["label"])
                 button.setCheckable(True)
                 button.setMinimumHeight(34)
-                button.setMaximumWidth(120)
                 button.setToolTip(port["name"])
                 button.clicked.connect(
                     lambda checked, member=port["name"]:
                     self.port_toggled.emit(device, member, checked))
-                self._grid.addWidget(button, index // self._columns, index % self._columns,
-                             Qt.AlignHCenter)
+                self._grid.addWidget(button, index // self._columns, index % self._columns)
                 self._buttons[port["name"]] = button
             button.setText(port["label"])
             button.setChecked(port["on"])
@@ -532,11 +530,17 @@ class ConfigPanel(QGroupBox):
         super().__init__("Configuration", parent)
         layout = QFormLayout(self)
         for key, value in config["indiserver"].items():
-            layout.addRow(QLabel("%s:" % key), QLabel(str(value)))
+            label = QLabel(str(value))
+            label.setWordWrap(True)
+            layout.addRow(QLabel("%s:" % key), label)
         devices = ", ".join("%s=%s" % (k, v) for k, v in sorted(config["devices"].items()))
-        layout.addRow(QLabel("Devices:"), QLabel(devices))
+        devices_label = QLabel(devices)
+        devices_label.setWordWrap(True)
+        layout.addRow(QLabel("Devices:"), devices_label)
         hidden = ", ".join(config["relay_exclude_names"]) or "-"
-        layout.addRow(QLabel("Hidden relays:"), QLabel(hidden))
+        hidden_label = QLabel(hidden)
+        hidden_label.setWordWrap(True)
+        layout.addRow(QLabel("Hidden relays:"), hidden_label)
 
 
 class LogPanel(QPlainTextEdit):
@@ -599,10 +603,11 @@ class MainWindow(QMainWindow):
             panel = RelayPanel(alias)
             panel.port_toggled.connect(self._on_port_toggled)
             self.relay_panels.append(panel)
-            relay_columns.addWidget(panel, 1)
+            relay_columns.addWidget(panel)
         left_layout.addLayout(relay_columns)
         left_layout.addWidget(ConfigPanel(self.config))
         left_layout.addStretch(1)
+        left.setMaximumWidth(340)
         splitter.addWidget(left)
 
         middle = QWidget()
@@ -631,7 +636,7 @@ class MainWindow(QMainWindow):
         self._ticker.timeout.connect(self._tick)
         self._ticker.start(500)
 
-        splitter.setSizes([280, 380, 440])
+        splitter.setSizes([320, 360, 420])
         self.setCentralWidget(central)
 
         self.connection_label = QLabel("disconnected")
