@@ -8,8 +8,8 @@ and the figure builder.  World frame: +x = south, +y = east, +z = up
 import math
 
 PIER_COLOR = "#a0522d"   # sienna: clearly distinct from the axes
-RA_COLOR = "#8e44ad"     # polar (hour angle) axis
-DEC_COLOR = "#1565c0"    # declination axis
+RA_COLOR = "#1565c0"     # polar (hour angle) axis
+DEC_COLOR = "#d32f2f"    # declination axis
 TUBE_COLOR = "#2e8b57"
 
 PIER_HEIGHT = 0.80    # m, vertical pier

@@ -264,7 +264,7 @@ without a quaternion check, only the readouts.
 In the right panel (between the checks panel and the log) the mount itself
 is drawn as a larger stick figure (orthographic, no GPU/3D library),
 oriented by angles, each part in its own color (pier sienna, polar axis
-purple, DEC axis blue, tube green):
+blue, DEC axis red, tube green):
 
 - the **pillar** (80 cm, vertical) stands at the origin;
 - on top of the pillar, the **polar (hour angle) axis** is drawn as a
