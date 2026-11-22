@@ -21,6 +21,8 @@ devices:
 # imu_optical_axis - which IMU body axis looks along the telescope tube.
 imu_park_quaternion: [0.108337, -0.022705, -0.081787, 0.990479]
 imu_optical_axis: +x
+scope_view_rotation: 200   # top view: az rotated by this many degrees clockwise
+                           # (200 = south up + 20 deg clockwise shed orientation)
 
 # pi5 wake-up: entering "static" from "inactive" with the pi5 unreachable.
 # The indiserver runs on the pi5, so the pi5 power relay of KMTronic8 is

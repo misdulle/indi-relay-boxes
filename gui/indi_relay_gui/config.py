@@ -18,6 +18,8 @@ DEFAULTS = {
     "roof_timeout_s": 180,
     "imu_park_quaternion": None,       # (w, x, y, z) captured parked; enables the IMU drawing
     "imu_optical_axis": "+x",          # IMU body axis pointing along the scope tube
+    "scope_view_rotation": 200.0,      # top-view azimuths rotated by this many degrees
+                                       # clockwise (200 = south up + 20 for the shed)
     "pi5_wake": {"enabled": False, "host": "192.168.1.23", "port": 80,
                  "user": "admin", "password": "", "relay": 1,
                  "timeout_s": 3, "wait_s": 90},
@@ -66,6 +68,8 @@ def normalize(raw):
     if axis not in _OPTICAL_AXES:
         raise ValueError("imu_optical_axis: use one of %s" % ", ".join(_OPTICAL_AXES))
     config["imu_optical_axis"] = axis
+    config["scope_view_rotation"] = float(
+        config.get("scope_view_rotation", DEFAULTS["scope_view_rotation"]))
     wake = config.get("pi5_wake") or {}
     if not isinstance(wake, dict):
         raise ValueError("pi5_wake: expected a mapping")

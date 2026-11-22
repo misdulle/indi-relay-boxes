@@ -34,6 +34,12 @@ def test_defaults_fill_missing_sections():
     assert config["checks"]["interval_s"] == 15
     assert config["sequences"]["starting"] == []
     assert config["roof_timeout_s"] == 180
+    assert config["scope_view_rotation"] == 200.0
+
+
+def test_scope_view_rotation_normalized():
+    config = config_module.normalize({"scope_view_rotation": "175"})
+    assert config["scope_view_rotation"] == 175.0
 
 
 def test_relay_exclude_names_are_normalized():

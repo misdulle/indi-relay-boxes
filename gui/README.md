@@ -103,6 +103,13 @@ online. While disabled, hovering a button shows why it is locked ("not in
 static mode; roof motor power off", ...). The roof panel's safety list shows
 mount parked, IMU, motor power and the driver's move-allowed lights.
 
+## Relay switches
+
+Relays are toggle buttons in two columns: KMTronic8 on the left, Relay16 on
+the right. Relays whose name matches `relay_exclude_names` (e.g. "none") and
+the roof control relays are hidden. Switching is only possible in `static`
+mode.
+
 ## Heartbeats panel
 
 The top panel shows a continuously updating clock plus one liveness row per
@@ -128,6 +135,8 @@ devices:               # INDI device names as reported by the drivers
 # Calibration of the scope position view (see that section below)
 imu_park_quaternion: [0.108337, -0.022705, -0.081787, 0.990479]
 imu_optical_axis: +x   # IMU body axis that looks along the tube
+scope_view_rotation: 200   # top view rotated 200 deg clockwise: south up,
+                           # plus 20 deg for the shed orientation
 
 relay_exclude_names: [none]   # relays with these PORT_NAMES are not shown
 
@@ -214,15 +223,22 @@ side view (altitude).
   the pointing azimuth from the IMU (or the parked reference). The filled
   **arrow** marks the front lens (pointing direction), the thick stub at
   the other end marks the camera.
+- **View rotation** - `scope_view_rotation` (default 200) rotates the top
+  view clockwise by that many degrees: 180 puts south up, +20 matches the
+  shed orientation. The N/E/S/W labels stay correct.
 - **Parked reference (grey)** - when `TELESCOPE_PARK.PARK` is on and no live
   IMU pointing is available, the tube is drawn in its park pose:
   horizontal, pointing south.
+- **Park re-anchoring** - while the mount reports PARK and fresh quaternions
+  arrive, the newest reading **is** used as the park reference, so sensor
+  yaw drift cannot make the parked scope wander off plain south (the
+  configured `imu_park_quaternion` is only the fallback before the first
+  parked reading). Once the mount moves, pointings are inferred relative
+  to that last parked reading.
 - The readout line shows RA/Dec, pier side, park state, the raw
   quaternion with its age, both pointings, the difference angle
-  between them and the IMU rotation against `imu_park_quaternion`.
-  That park quaternion (captured with the mount parked - scope level,
-  pointing south) is the reference used to infer the scope position from
-  later quaternion readings.
+  between them and the IMU rotation against the active park reference
+  (0 while parked).
 
 If site coordinates are missing or zero, only the IMU pointer is drawn;
 without a quaternion check, only the readouts.
