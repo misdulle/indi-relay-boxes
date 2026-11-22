@@ -109,8 +109,7 @@ class RelayPanel(QGroupBox):
         if vector is None:
             self.setTitle("%s (offline)" % device)
         else:
-            self.setTitle("%s - %d relays%s" % (device, len(ports),
-                                                " - communication error" if alert else ""))
+            self.setTitle("%s %s" % (device, " - communication error" if alert else ""))
         wanted = {port["name"]: port for port in ports}
         for name in list(self._buttons):
             if name not in wanted:
@@ -385,7 +384,7 @@ class RoofPanel(QGroupBox):
     roof_stop = pyqtSignal()
 
     def __init__(self, parent=None):
-        super().__init__("Roll-off roof", parent)
+        super().__init__("Roof", parent)
         layout = QVBoxLayout(self)
         self.state_label = QLabel("offline")
         self.state_label.setAlignment(Qt.AlignCenter)
@@ -607,7 +606,7 @@ class MainWindow(QMainWindow):
         left_layout.addLayout(relay_columns)
         left_layout.addWidget(ConfigPanel(self.config))
         left_layout.addStretch(1)
-        left.setMaximumWidth(340)
+        left.setMaximumWidth(400)
         splitter.addWidget(left)
 
         middle = QWidget()
