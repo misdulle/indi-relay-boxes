@@ -290,7 +290,10 @@ using OpenCV (`pip install opencv-python-headless` is needed):
 - the stream is read over TCP (`rtsp_transport;tcp`) to avoid UDP packet
   loss artefacts;
 - on failure the view shows the reason and reconnects every 5 s; the URL
-  is never written to the log (credentials stripped).
+  is never written to the log (credentials stripped);
+- the `stream on` checkbox next to the view toggles the stream without
+  editing the config - `shed_camera.enabled` is only the default state
+  applied at start and on config reload.
 
 ### Adding new checks
 

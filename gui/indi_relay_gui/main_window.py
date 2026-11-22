@@ -8,7 +8,7 @@ from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (QBrush, QColor, QImage, QKeySequence, QPainter, QPen,
                          QPixmap, QPolygonF)
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
+    QAbstractItemView, QCheckBox, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QShortcut,
     QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -430,29 +430,51 @@ class CamPanel(QGroupBox):
         self.setAlignment(Qt.AlignHCenter)
         self._log = log
         self._reader = None
+        self._config = config
         self.view = QLabel("camera disabled")
         self.view.setAlignment(Qt.AlignCenter)
         self.view.setMinimumHeight(150)
         self.view.setStyleSheet(
             "background: #202020; color: #909090; font-size: 9pt;")
         layout = QVBoxLayout(self)
+        self.toggle = QCheckBox("stream on")
+        self.toggle.toggled.connect(self._on_toggle)
+        layout.addWidget(self.toggle)
         layout.addWidget(self.view, 1)
         self.frame_received.connect(self._on_frame)
         self.status_changed.connect(self._on_status)
         self.restart(config)
 
     def restart(self, config):
-        if self._reader is not None:
-            previous = self._reader
-            self._reader = None
-            previous.stop()
+        self._config = config
+        self.stop()
         settings = config.get("shed_camera") or {}
-        if not settings.get("enabled") or not settings.get("url"):
+        enabled = bool(settings.get("enabled")) and bool(settings.get("url"))
+        self.toggle.blockSignals(True)
+        self.toggle.setChecked(enabled)
+        self.toggle.blockSignals(False)
+        if not enabled:
             self.view.setText("camera disabled")
             return
+        self._start_reader(settings)
+
+    def _on_toggle(self, checked):
+        self.stop()
+        settings = self._config.get("shed_camera") or {}
+        if checked and settings.get("url"):
+            self._start_reader(settings)
+        else:
+            self.toggle.blockSignals(True)
+            self.toggle.setChecked(False)
+            self.toggle.blockSignals(False)
+            self.view.setPixmap(QPixmap())
+            self.view.setText("no url" if checked
+                              else "camera disabled")
+
+    def _start_reader(self, settings):
         from .camera import RtspReader, strip_url_credentials
         self._log("camera: connecting to %s"
-                  % strip_url_credentials(settings.get("url")))
+                  % strip_url_credentials(settings["url"]))
         self._reader = RtspReader(
             settings["url"], settings.get("fps", 8),
             on_frame=self.frame_received.emit,
