@@ -18,6 +18,8 @@ needed.
 On first start a template config is written to
 `~/.config/indi-relay-boxes/config.yaml`; edit it and use "File -> Reload config".
 
+Shortcuts: `Ctrl+Q` quit, `Ctrl+F` maximize/restore, reload config from the menu.
+
 ## Operating modes
 
 | Mode        | Behaviour |
