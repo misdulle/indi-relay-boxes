@@ -106,20 +106,28 @@ def test_gem_structure_pillar_ra_bar_dec_bar_tube():
     assert dec_mid == (0.0, 0.0, 1.0)       # at the centre of the RA bar
     dec_dir = mount3d.vec_unit(mount3d.vec_sub(dec_bar["b"], dec_bar["a"]))
     assert abs(mount3d.vec_dot(dec_dir, pole)) < EPS       # perpendicular to RA
-    tube = by_width[17][0]
-    tube_mid = mount3d.vec_scale(mount3d.vec_add(tube["a"], tube["b"]), 0.5)
+    tube = [s for s in figure["segments"] if s["color"] == "#2e8b57"]
+    assert len(tube) == len(mount3d.TUBE_WIDTHS)
+    east = mount3d.dir_from_azalt(90.0, 0.0)
+    ordered = sorted(tube, key=lambda s: mount3d.vec_dot(
+        mount3d.vec_scale(mount3d.vec_add(s["a"], s["b"]), 0.5), east))
+    # telescopic: sections widen towards the lens side
+    assert [s["width"] for s in ordered] == list(mount3d.TUBE_WIDTHS)
+    front = ordered[-1]
+    approx(mount3d.vec_unit(mount3d.vec_sub(front["b"], front["a"])), east)
+    points = [p for s in tube for p in (s["a"], s["b"])]
+    along = sorted((mount3d.vec_dot(p, east), p) for p in points)
+    tail, tip = along[0][1], along[-1][1]
+    assert abs(mount3d.vec_norm(mount3d.vec_sub(tip, tail))
+               - 2.0 * mount3d.TUBE_HALF) < EPS
     head = (0.0, 0.0, 1.0)
-    # the tube is attached at the end of the DEC bar (directly on the axis)
-    on_dec_bar = min(
-        mount3d.vec_norm(mount3d.vec_sub(
-            tube_mid, mount3d.vec_add(head, mount3d.vec_scale(
-                dec_dir, mount3d.DEC_LENGTH / 2.0)))),
-        mount3d.vec_norm(mount3d.vec_sub(
-            tube_mid, mount3d.vec_sub(head, mount3d.vec_scale(
-                dec_dir, mount3d.DEC_LENGTH / 2.0)))))
+    # the tube centreline is attached at the end of the DEC bar
+    dec_tip = mount3d.vec_add(head, mount3d.vec_scale(dec_dir, mount3d.DEC_LENGTH / 2.0))
+    dec_back = mount3d.vec_sub(head, mount3d.vec_scale(dec_dir, mount3d.DEC_LENGTH / 2.0))
+    tube_mid = mount3d.vec_scale(mount3d.vec_add(tail, tip), 0.5)
+    on_dec_bar = min(mount3d.vec_norm(mount3d.vec_sub(tube_mid, dec_tip)),
+                     mount3d.vec_norm(mount3d.vec_sub(tube_mid, dec_back)))
     assert on_dec_bar < EPS
-    approx(mount3d.vec_unit(mount3d.vec_sub(tube["b"], tube["a"])),
-           mount3d.dir_from_azalt(90.0, 0.0))
 
 
 def test_build_figure_parked_has_tube_pointing_south():
@@ -128,27 +136,31 @@ def test_build_figure_parked_has_tube_pointing_south():
          "pier": "west"},
         {"lat": 48.2, "lon": 7.6})
     assert len(figure["segments"]) > 2
+    assert len(figure["polygons"]) == 1 and len(figure["polygons"][0]["points"]) == mount3d.DISC_POINTS
+    assert all(point[2] == 0.0 for point in figure["polygons"][0]["points"])
     south = mount3d.dir_from_azalt(180.0, 0.0)
-    tube = next(s for s in figure["segments"] if s["width"] == 17)
-    direction = mount3d.vec_sub(tube["b"], tube["a"])
-    approx(mount3d.vec_unit(direction), south)
+    tube = [s for s in figure["segments"] if s["color"] == "#2e8b57"]
+    ends = [point for s in tube for point in (s["a"], s["b"])]
+    tip = max(ends, key=lambda p: mount3d.vec_dot(p, south))
+    tail = min(ends, key=lambda p: mount3d.vec_dot(p, south))
+    approx(mount3d.vec_unit(mount3d.vec_sub(tip, tail)), south)
     labels = [text for _, text in figure["labels"]]
     assert "lens" in labels and "camera" in labels and "pier" in labels
     kinds = sorted(marker["kind"] for marker in figure["markers"])
     assert kinds == ["camera", "lens"]
     lens = next(m for m in figure["markers"] if m["kind"] == "lens")
     camera = next(m for m in figure["markers"] if m["kind"] == "camera")
-    tube = next(s for s in figure["segments"] if s["width"] == 17)
-    approx(lens["point"], tube["b"])    # lens at the pointing end
-    approx(camera["point"], tube["a"])  # camera at the back end
+    approx(lens["point"], tip)      # lens at the pointing end
+    approx(camera["point"], tail)   # camera at the back end
 
 
 def test_build_figure_without_pointing_only_pier_and_ra():
     figure = mount3d.build_figure({}, {"lat": 48.2, "lon": 7.6})
-    assert len(figure["segments"]) == 2      # pier + RA axis
+    assert len(figure["segments"]) == 2      # pier + RA axis (ground is a polygon)
+    assert len(figure["polygons"]) == 1 and len(figure["polygons"][0]["points"]) == mount3d.DISC_POINTS
     assert [text for _, text in figure["labels"]] == ["pier", "RA"]
     figure = mount3d.build_figure({}, None)
-    assert len(figure["segments"]) == 1      # pier only
+    assert len(figure["segments"]) == 1      # pier only + ground
 
 
 def test_sort_for_draws_far_first():

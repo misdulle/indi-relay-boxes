@@ -11,6 +11,9 @@ PIER_HEIGHT = 1.0     # m, pier top above ground
 RA_LENGTH = 0.50      # m, polar (hour angle) bar, pointing at the NCP
 DEC_LENGTH = 0.30     # m, DEC bar through the centre of the RA bar
 TUBE_HALF = 0.55      # m, half length of the drawn tube
+TUBE_WIDTHS = (13, 16, 21)   # telescopic look: wider towards the lens
+GROUND_RADIUS = 0.60  # m, ground disc at the base of the pier
+DISC_POINTS = 36
 
 
 def vec_add(a, b):
@@ -86,6 +89,15 @@ def _seg(a, b, color, width):
     return {"a": a, "b": b, "color": color, "width": width}
 
 
+def _ground_disc(radius=GROUND_RADIUS, points=DISC_POINTS):
+    """Horizontal filled disc at the pier base, materializing the ground."""
+    ring = [(radius * math.cos(2.0 * math.pi * i / points),
+             radius * math.sin(2.0 * math.pi * i / points), 0.0)
+            for i in range(points)]
+    return {"points": ring, "color": "#77848c", "alpha": 70,
+            "edge": "#3f484d"}
+
+
 def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     """Stick figure of the mount from its reported angles.
 
@@ -96,7 +108,7 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     lat = None
     if site and site.get("lat"):
         lat = site["lat"]
-    figure = {"segments": [], "labels": [], "markers": [],
+    figure = {"segments": [], "labels": [], "markers": [], "polygons": [],
               "view": (view_az, view_alt)}
     segments = figure["segments"]
     labels = figure["labels"]
@@ -104,6 +116,7 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
 
     origin = (0.0, 0.0, 0.0)
     head = (0.0, 0.0, PIER_HEIGHT)
+    figure["polygons"].append(_ground_disc())
     segments.append(_seg(origin, head, "#555555", 15))
     labels.append((vec_scale(head, 1.02), "pier"))
 
@@ -126,7 +139,11 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     labels.append((vec_add(saddle, vec_scale(dec, 0.08)), "DEC"))
     tail = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF))
     tip = vec_add(saddle, vec_scale(tube_dir, TUBE_HALF))
-    segments.append(_seg(tail, tip, "#2e8b57", 17))
+    step = 2.0 * TUBE_HALF / len(TUBE_WIDTHS)
+    for index, width in enumerate(TUBE_WIDTHS):
+        start = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF + index * step))
+        end = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF + (index + 1) * step))
+        segments.append(_seg(start, end, "#2e8b57", width))
     markers.append({"kind": "lens", "point": tip, "color": "#2e8b57"})
     markers.append({"kind": "camera", "point": tail, "color": "#4a4a4a"})
     labels.append((vec_add(tip, vec_scale(tube_dir, 0.12)), "lens"))

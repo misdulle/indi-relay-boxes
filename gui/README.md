@@ -275,8 +275,11 @@ oriented by angles:
   it), so it rotates about the DEC axis; its direction uses (in order of
   preference) `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates,
   then the parked pose (horizontal, pointing south) when
-  `TELESCOPE_PARK.PARK` is on; the front lens is materialized as a filled
+  `TELESCOPE_PARK.PARK` is on; it is drawn **telescopic** (three sections,
+  widening towards the front), the front lens is materialized as a filled
   disc at the pointing end, the camera as a filled square at the back end;
+- a **ground disc** (semi-transparent horizontal disc, `GROUND_RADIUS` =
+  0.6 m) sits at the base of the pier;
 - **Orbiting the view** - right-click-drag on the 2D projections or on the
   3D figure itself: horizontal movement swings the 3D camera azimuth,
   vertical movement changes its altitude. The result updates `mount3d_view`

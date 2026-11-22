@@ -472,7 +472,10 @@ class Mount3DCanvas(QWidget):
 
     def _fit(self, rect, view_az, view_alt):
         """scale/center so the figure fills the widget."""
-        points = [marker["point"] for marker in self.figure.get("markers", [])]
+        points = []
+        for polygon in self.figure.get("polygons", []):
+            points += polygon["points"]
+        points += [marker["point"] for marker in self.figure.get("markers", [])]
         points += [point for point, _ in self.figure.get("labels", [])]
         for seg in self.figure.get("segments", []):
             points += [seg["a"], seg["b"]]
@@ -496,6 +499,16 @@ class Mount3DCanvas(QWidget):
         rect = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
         view_az, view_alt = self.figure.get("view", (200.0, 25.0))
         scale, center = self._fit(rect, view_az, view_alt)
+        for polygon in self.figure.get("polygons", []):
+            poly = QPolygonF()
+            for point in polygon["points"]:
+                u, v, _ = mount3d.project(point, view_az, view_alt, scale, center)
+                poly.append(QPointF(u, v))
+            fill = QColor(polygon["color"])
+            fill.setAlpha(polygon.get("alpha", 70))
+            painter.setPen(QPen(QColor(polygon.get("edge", polygon["color"]))))
+            painter.setBrush(QBrush(fill))
+            painter.drawPolygon(poly)
         painter.setPen(QPen(QColor("#777777")))
         for point, text in self.figure.get("labels", []):
             u, v, _ = mount3d.project(point, view_az, view_alt, scale, center)
