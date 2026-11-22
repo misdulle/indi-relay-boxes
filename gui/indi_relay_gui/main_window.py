@@ -475,6 +475,7 @@ class LogPanel(QPlainTextEdit):
 
 class MainWindow(QMainWindow):
     reconnect_event = pyqtSignal()
+    log_event = pyqtSignal(str)
     vector_received = pyqtSignal(object)
     property_deleted = pyqtSignal(str, str)
     message_received = pyqtSignal(str, str)
@@ -563,6 +564,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.reconnect_button)
 
     def _wire(self):
+        self.log_event.connect(self._on_log)
         self.reconnect_event.connect(self._on_reconnect_requested)
         self.vector_received.connect(self._on_vector)
         self.property_deleted.connect(self._on_property_deleted)
@@ -577,6 +579,9 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def log(self, message):
+        self.log_event.emit(str(message))
+
+    def _on_log(self, message):
         self.log_panel.append(message)
 
     def _connect(self):

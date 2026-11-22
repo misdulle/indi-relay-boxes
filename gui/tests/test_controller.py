@@ -313,19 +313,31 @@ def test_wake_pi5_switches_relay_then_reconnects(monkeypatch):
                         lambda host, timeout_s: next(pings))
     switches = []
 
-    def fake_set_relay(*args):
+    def fake_power_on(*args):
         switches.append(args)
-        return "/FF0301"
+        return "/FF0301", False
 
-    monkeypatch.setattr(controller_module.kmtronic, "set_relay", fake_set_relay)
+    monkeypatch.setattr(controller_module.kmtronic, "power_on", fake_power_on)
     monkeypatch.setattr(controller_module, "PI5_POLL_S", 0.01)
 
     assert controller.set_mode(Mode.STATIC) is True
     assert wait_until(lambda: "reconnect_requested" in [e for e, _ in events])
-    assert switches == [("192.0.2.10", 80, "", "", 3, True, 1)]
+    assert switches == [("192.0.2.10", 80, "", "", 3, 1)]
     assert controller.client.switches == []
     assert "switching relay 3 on 192.0.2.10 directly" in " ".join(logs)
     assert "no relay action needed" not in " ".join(logs)
+
+
+def test_wake_pi5_cycles_powered_relay(monkeypatch):
+    controller, events, logs = make_wake_controller()
+    monkeypatch.setattr(controller_module.kmtronic, "host_reachable", lambda *a: False)
+    monkeypatch.setattr(controller_module.kmtronic, "power_on",
+                        lambda *a: ("/FF0300, then /FF0301", True))
+    monkeypatch.setattr(controller_module.kmtronic, "set_relay", lambda *a: ("", False))
+
+    assert controller.set_mode(Mode.STATIC) is True
+    assert wait_until(lambda: any("cycled" in line for line in logs))
+    assert not any("could not switch" in line for line in logs)
 
 
 def test_wake_pi5_skipped_when_disabled(monkeypatch):
@@ -333,7 +345,7 @@ def test_wake_pi5_skipped_when_disabled(monkeypatch):
     called = []
     monkeypatch.setattr(controller_module.kmtronic, "host_reachable",
                         lambda *a: called.append("ping"))
-    monkeypatch.setattr(controller_module.kmtronic, "set_relay",
+    monkeypatch.setattr(controller_module.kmtronic, "power_on",
                         lambda *a: called.append("relay"))
 
     assert controller.set_mode(Mode.STATIC) is True
@@ -346,10 +358,11 @@ def test_wake_pi5_skipped_when_pi5_pings(monkeypatch):
     controller, events, logs = make_wake_controller()
     monkeypatch.setattr(controller_module.kmtronic, "host_reachable", lambda *a: True)
     called = []
-    monkeypatch.setattr(controller_module.kmtronic, "set_relay",
+    monkeypatch.setattr(controller_module.kmtronic, "power_on",
                         lambda *a: called.append("relay"))
 
     assert controller.set_mode(Mode.STATIC) is True
     time.sleep(0.2)
     assert called == []
+    assert "no relay action needed" in " ".join(logs)
     assert "reconnect_requested" not in [e for e, _ in events]

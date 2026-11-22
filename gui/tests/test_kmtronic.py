@@ -134,12 +134,12 @@ def test_read_relay_on_http_error(box, serve):
 
 def test_set_relay_ff_style(box, serve):
     port = serve()
-    path = kmtronic.set_relay("127.0.0.1", port, "", "", 1, True)
-    assert path == "/FF0101"
+    result = kmtronic.set_relay("127.0.0.1", port, "", "", 1, True)
+    assert result == ("/FF0101", False)
     with box.lock:
         assert box.states[1] == 1
-    path = kmtronic.set_relay("127.0.0.1", port, "", "", 1, False)
-    assert path == "/FF0100"
+    result = kmtronic.set_relay("127.0.0.1", port, "", "", 1, False)
+    assert result == ("/FF0100", False)
     with box.lock:
         assert box.states[1] == 0
 
@@ -152,7 +152,7 @@ def test_set_relay_ff_style_rejects_http_error(box, serve):
 
 def test_set_relay_cgi_fallback(box, serve):
     port = serve(ff_style=False)
-    assert kmtronic.set_relay("127.0.0.1", port, "", "", 2, True) == "/relays.cgi?relay=2"
+    assert kmtronic.set_relay("127.0.0.1", port, "", "", 2, True) == ("/relays.cgi?relay=2", False)
     with box.lock:
         assert box.states[2] == 1
     assert box.requests == ["/FF0201", "/status.xml", "/relays.cgi?relay=2"]
@@ -162,22 +162,66 @@ def test_set_relay_cgi_fallback_skips_when_already_on(box, serve):
     port = serve(ff_style=False)
     with box.lock:
         box.states[1] = 1
-    path = kmtronic.set_relay("127.0.0.1", port, "", "", 1, True)
-    assert path == "/status.xml (already on)"
+    result = kmtronic.set_relay("127.0.0.1", port, "", "", 1, True)
+    assert result == ("/status.xml (already on)", True)
     assert box.requests == ["/FF0101", "/status.xml"]
 
 
 def test_set_relay_cgi_fallback_skips_when_already_off(box, serve):
     port = serve(ff_style=False)
-    path = kmtronic.set_relay("127.0.0.1", port, "", "", 1, False)
-    assert path == "/status.xml (already off)"
+    result = kmtronic.set_relay("127.0.0.1", port, "", "", 1, False)
+    assert result == ("/status.xml (already off)", True)
     assert box.requests == ["/FF0100", "/status.xml"]
+
+
+def test_power_cycles_existing_relay(box, serve):
+    port = serve()
+    with box.lock:
+        box.states[1] = 1
+    path, cycled = kmtronic.power_on("127.0.0.1", port, "", "", 1, pause_s=0)
+    assert cycled is True
+    assert path == "/FF0100, then /FF0101"
+    with box.lock:
+        assert box.states[1] == 1
+    assert box.requests == ["/status.xml", "/FF0100", "/FF0101"]
+
+
+def test_power_on_off_relay(box, serve):
+    port = serve()
+    path, cycled = kmtronic.power_on("127.0.0.1", port, "", "", 1, pause_s=0)
+    assert (path, cycled) == ("/FF0101", False)
+    with box.lock:
+        assert box.states[1] == 1
+    assert box.requests == ["/status.xml", "/FF0101"]
+
+
+def test_power_on_cycles_via_cgi(box, serve):
+    port = serve(ff_style=False)
+    with box.lock:
+        box.states[1] = 1
+    path, cycled = kmtronic.power_on("127.0.0.1", port, "", "", 1, pause_s=0)
+    assert (path, cycled) == ("/relays.cgi?relay=1, then /relays.cgi?relay=1", True)
+    with box.lock:
+        assert box.states[1] == 1
+
+
+def test_power_on_unknown_state_switches_on(monkeypatch, box, serve):
+    port = serve()
+
+    def broken(*args, **kwargs):
+        raise kmtronic.KmtronicError("no status.xml")
+
+    monkeypatch.setattr(kmtronic, "read_relay", broken)
+    path, cycled = kmtronic.power_on("127.0.0.1", port, "", "", 1, pause_s=0)
+    assert (path, cycled) == ("/FF0101", False)
+    with box.lock:
+        assert box.states[1] == 1
 
 
 def test_set_relay_forced_cgi(box, serve):
     port = serve(ff_style=True)
-    path = kmtronic.set_relay("127.0.0.1", port, "", "", 3, True, force_cgi=True)
-    assert path == "/relays.cgi?relay=3"
+    result = kmtronic.set_relay("127.0.0.1", port, "", "", 3, True, force_cgi=True)
+    assert result == ("/relays.cgi?relay=3", False)
     with box.lock:
         assert box.states[3] == 1
 

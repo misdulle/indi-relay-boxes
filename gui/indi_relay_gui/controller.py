@@ -272,13 +272,15 @@ class Controller:
             self.log("pi5_wake: %s unreachable -> switching relay %d on %s directly"
                      % (ping_host, relay, cfg["host"]))
             try:
-                path = kmtronic.set_relay(cfg["host"], cfg["port"], cfg["user"],
-                                          cfg["password"], relay, True, cfg["timeout_s"])
+                path, cycled = kmtronic.power_on(cfg["host"], cfg["port"], cfg["user"],
+                                                 cfg["password"], relay, cfg["timeout_s"])
             except Exception as error:
-                self.log("pi5_wake: could not switch the relay: %s" % error)
+                self.log("pi5_wake: could not switch relay %d on %s: %s "
+                         "(check the box address, user/password and the relay number)"
+                         % (relay, cfg["host"], error))
                 return
-            self.log("pi5_wake: pi5 power on (%s), waiting up to %.0f s for %s"
-                     % (path, cfg["wait_s"], ping_host))
+            self.log("pi5_wake: pi5 power %s (%s), waiting up to %.0f s for %s"
+                     % ("cycled" if cycled else "on", path, cfg["wait_s"], ping_host))
             deadline = time.time() + cfg["wait_s"]
             while time.time() < deadline:
                 time.sleep(PI5_POLL_S)

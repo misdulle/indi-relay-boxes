@@ -58,10 +58,14 @@ same protocol as the KMTronic8 driver (`common/kmtronic_cmd.h`):
   `/status.xml`, then `GET /relays.cgi?relay=N` as a toggle
 - basic auth when a user is configured
 
-The relay is only commanded if the ping fails. Afterwards the GUI keeps
-pinging for up to `wait_s` seconds and, as soon as the pi5 is back, it
-reconnects to the indiserver and connects the drivers automatically. All of
-this runs in the background; the GUI stays in `static` meanwhile.
+If `/status.xml` shows the relay is already on, it is power-cycled
+(off, ~1 s, on); when the state cannot be read the switch to on is sent
+unconditionally. Afterwards the GUI keeps pinging for up to `wait_s`
+seconds and, as soon as the pi5 is back, it reconnects to the indiserver and
+connects the drivers automatically. All of this runs in the background; the
+GUI stays in `static` meanwhile, and every step is written to the log panel
+(logs from background threads are marshalled to the GUI thread, so HTTP
+errors like 401 or an unreachable box show up there).
 
 ```yaml
 pi5_wake:
