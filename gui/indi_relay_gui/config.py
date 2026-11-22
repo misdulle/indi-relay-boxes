@@ -20,7 +20,7 @@ DEFAULTS = {
     "imu_optical_axis": "+x",          # IMU body axis pointing along the scope tube
     "scope_view_rotation": 200.0,      # top-view azimuths rotated by this many degrees
                                        # clockwise (200 = south up + 20 for the shed)
-    "shed_camera": {"enabled": False, "url": "", "fps": 8},
+    "shed_cameras": {"fps": 8.0, "cameras": {}},
     "mount3d_view": {"az": 200.0, "alt": 25.0},
     "pi5_wake": {"enabled": False, "host": "192.168.1.23", "port": 80,
                  "user": "admin", "password": "", "relay": 1,
@@ -72,14 +72,29 @@ def normalize(raw):
     config["imu_optical_axis"] = axis
     config["scope_view_rotation"] = float(
         config.get("scope_view_rotation", DEFAULTS["scope_view_rotation"]))
-    cam = config.get("shed_camera") or {}
-    if not isinstance(cam, dict):
-        raise ValueError("shed_camera: expected a mapping")
-    config["shed_camera"] = {
-        "enabled": bool(cam.get("enabled", False)),
-        "url": str(cam.get("url", "")),
-        "fps": min(30.0, max(1.0, float(cam.get("fps", 8)))),
-    }
+    legacy = config.pop("shed_camera", None)
+    cams = config.get("shed_cameras") or {}
+    if not isinstance(cams, dict):
+        raise ValueError("shed_cameras: expected a mapping")
+    default_fps = min(30.0, max(1.0, float(cams.get("fps", 8.0))))
+    cameras = cams.get("cameras") or {}
+    if not isinstance(cameras, dict):
+        raise ValueError("shed_cameras.cameras: expected a mapping")
+    cameras = dict(cameras)
+    if not cameras and isinstance(legacy, dict) and legacy.get("url"):
+        cameras["cam1"] = legacy   # old single-camera config
+    normalized_cams = {}
+    for name, settings in sorted(cameras.items()):
+        if settings is None:
+            settings = {}
+        if not isinstance(settings, dict):
+            raise ValueError("shed_cameras.%s: expected a mapping" % name)
+        normalized_cams[str(name)] = {
+            "enabled": bool(settings.get("enabled", False)),
+            "url": str(settings.get("url", "")),
+            "fps": min(30.0, max(1.0, float(settings.get("fps", default_fps)))),
+        }
+    config["shed_cameras"] = {"fps": default_fps, "cameras": normalized_cams}
     view3d = config.get("mount3d_view") or {}
     if not isinstance(view3d, dict):
         raise ValueError("mount3d_view: expected a mapping")

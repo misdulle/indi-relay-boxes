@@ -8,7 +8,7 @@ from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (QBrush, QColor, QImage, QKeySequence, QPainter, QPen,
                          QPixmap, QPolygonF)
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
+    QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QShortcut,
     QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -535,9 +535,9 @@ class CamPanel(QGroupBox):
         self.view.setStyleSheet(
             "background: #202020; color: #909090; font-size: 9pt;")
         layout = QVBoxLayout(self)
-        self.toggle = QCheckBox("stream on")
-        self.toggle.toggled.connect(self._on_toggle)
-        layout.addWidget(self.toggle)
+        self.picker = QComboBox()
+        self.picker.currentTextChanged.connect(self._on_pick)
+        layout.addWidget(self.picker)
         layout.addWidget(self.view, 1)
         self.frame_received.connect(self._on_frame)
         self.status_changed.connect(self._on_status)
@@ -546,28 +546,35 @@ class CamPanel(QGroupBox):
     def restart(self, config):
         self._config = config
         self.stop()
-        settings = config.get("shed_camera") or {}
-        enabled = bool(settings.get("enabled")) and bool(settings.get("url"))
-        self.toggle.blockSignals(True)
-        self.toggle.setChecked(enabled)
-        self.toggle.blockSignals(False)
-        if not enabled:
+        cams = (config.get("shed_cameras") or {}).get("cameras") or {}
+        self.picker.blockSignals(True)
+        self.picker.clear()
+        self.picker.addItem("OFF")
+        for name in sorted(cams):
+            self.picker.addItem(name)
+        picked = next((name for name in sorted(cams)
+                       if cams[name].get("enabled") and cams[name].get("url")),
+                      "OFF")
+        self.picker.setCurrentText(picked)
+        self.picker.blockSignals(False)
+        self._apply_pick(picked, cams)
+
+    def _on_pick(self, name):
+        cams = (self._config.get("shed_cameras") or {}).get("cameras") or {}
+        self._apply_pick(name, cams)
+
+    def _apply_pick(self, name, cams):
+        self.stop()
+        if name == "OFF":
+            self.view.setPixmap(QPixmap())
             self.view.setText("camera disabled")
             return
-        self._start_reader(settings)
-
-    def _on_toggle(self, checked):
-        self.stop()
-        settings = self._config.get("shed_camera") or {}
-        if checked and settings.get("url"):
-            self._start_reader(settings)
-        else:
-            self.toggle.blockSignals(True)
-            self.toggle.setChecked(False)
-            self.toggle.blockSignals(False)
+        settings = cams.get(name) or {}
+        if not settings.get("url"):
             self.view.setPixmap(QPixmap())
-            self.view.setText("no url" if checked
-                              else "camera disabled")
+            self.view.setText("no url configured for %s" % name)
+            return
+        self._start_reader(settings)
 
     def _start_reader(self, settings):
         from .camera import RtspReader, strip_url_credentials

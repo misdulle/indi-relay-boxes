@@ -144,10 +144,15 @@ mount3d_view:          # viewpoint of the 3D mount stick figure
   az: 200              # camera azimuth (deg): looks at the mount from here
   alt: 25              # camera altitude (deg), -80..80
 
-shed_camera:           # RTSP view of a camera in the shed (see below)
-  enabled: false
-  url: rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2
-  fps: 8               # displayed frames per second, 1-30
+shed_cameras:          # RTSP cameras in the shed, picked from a dropdown
+  fps: 8               # default displayed frames per second, 1-30
+  cameras:             # free names = dropdown entries; "enabled" = at start
+    cam1:
+      enabled: true
+      url: rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2
+    cam2:
+      enabled: false
+      url: ""
 
 relay_exclude_names: [none]   # relays with these PORT_NAMES are not shown
 
@@ -287,23 +292,27 @@ is a matter of editing the constants at the top of
 
 ## Shed camera
 
-The middle panel can embed a live RTSP view of a camera in the shed
-(`shed_camera.enabled: true`). It runs on a dedicated background thread
-using OpenCV (`pip install opencv-python-headless` is needed):
+The middle panel can embed a live RTSP view of one or more cameras in the
+shed, selected from a dropdown listing **OFF** plus one entry per camera
+defined under `shed_cameras.cameras` (the free names you give them become
+the dropdown entries; `enabled: true` marks the one shown at start). The
+view runs on a dedicated background thread using OpenCV
+(`pip install opencv-python-headless` is needed):
 
 - to keep the CPU load low (typically < 5% of one core), the reader
   continuously *grabs* the stream - which stays on the live edge - but only
-  *retrieves/decodes a frame* at `fps` (default 8, clamped to 1-30);
-- use the camera's **substream** (second channel, usually a few hundred
-  kbps / small resolution) for the GUI URL, e.g.
+  *retrieves/decodes a frame* at `fps` (default 8, clamped to 1-30;
+  per-camera `fps` overrides `shed_cameras.fps`);
+- use the cameras' **substream** (second channel, usually a few hundred
+  kbps / small resolution) for the GUI URLs, e.g.
   `rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2` on Hikvision;
 - the stream is read over TCP (`rtsp_transport;tcp`) to avoid UDP packet
   loss artefacts;
-- on failure the view shows the reason and reconnects every 5 s; the URL
-  is never written to the log (credentials stripped);
-- the `stream on` checkbox next to the view toggles the stream without
-  editing the config - `shed_camera.enabled` is only the default state
-  applied at start and on config reload.
+- on failure the view shows the reason and reconnects every 5 s; URLs are
+  never written to the log (credentials stripped);
+- picking another camera or OFF stops the previous reader; a camera without
+  a URL shows a hint instead. An old single `shed_camera:` block is still
+  accepted and becomes `cam1`.
 
 ### Adding new checks
 

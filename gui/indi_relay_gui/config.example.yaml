@@ -31,15 +31,23 @@ mount3d_view:
   az: 200
   alt: 25
 
-# RTSP camera inside the shed, shown in the middle column. The reader
-# continuously grabs the stream but only decodes a frame at the configured
-# rate, so use the camera's SUBSTREAM (second channel) for a low CPU load.
-# Needs opencv-python (pip install opencv-python-headless); the password is
-# stored in plaintext in this file, and is never written to the log.
-shed_camera:
-  enabled: false
-  url: rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2
-  fps: 8                 # 1-30 display frames per second
+# RTSP cameras inside the shed, chosen in the middle column dropdown
+# (OFF / cam1 / cam2 - names are free, they become the dropdown entries).
+# The selected camera's reader continuously grabs the stream but only decodes
+# a frame at the configured rate, so use each camera's SUBSTREAM (second
+# channel) for a low CPU load. Needs opencv-python (pip install
+# opencv-python-headless); passwords are stored in plaintext in this file
+# and never written to the log. "enabled" selects the camera shown at start.
+shed_cameras:
+  fps: 8                 # default frame rate (1-30) used by every camera
+                         # that does not set its own fps
+  cameras:
+    cam1:
+      enabled: true
+      url: rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2
+    cam2:
+      enabled: false
+      url: ""
 
 # pi5 wake-up: entering "static" from "inactive" with the pi5 unreachable.
 # The indiserver runs on the pi5, so the pi5 power relay of KMTronic8 is

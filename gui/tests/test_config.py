@@ -27,9 +27,12 @@ def test_load_example_config():
     assert config["pi5_wake"]["relay"] == 1
     assert config["pi5_wake"]["ping_host"] == "192.168.1.29"
     assert config["mount3d_view"] == {"az": 200.0, "alt": 25.0}
-    assert config["shed_camera"] == {"enabled": False,
-                                     "url": "rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2",
-                                     "fps": 8.0}
+    cameras = config["shed_cameras"]["cameras"]
+    assert cameras["cam1"]["url"] == (
+        "rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2")
+    assert cameras["cam1"]["enabled"] is True
+    assert cameras["cam1"]["fps"] == 8.0
+    assert cameras["cam2"] == {"enabled": False, "url": "", "fps": 8.0}
 
 
 def test_defaults_fill_missing_sections():
@@ -46,28 +49,47 @@ def test_scope_view_rotation_normalized():
     assert config["scope_view_rotation"] == 175.0
 
 
-def test_shed_camera_defaults_off():
+def test_shed_cameras_defaults_empty():
     config = config_module.normalize({})
-    assert config["shed_camera"] == {"enabled": False, "url": "", "fps": 8.0}
+    assert config["shed_cameras"] == {"fps": 8.0, "cameras": {}}
 
 
-def test_shed_camera_normalized():
+def test_shed_cameras_normalized_sorted_with_own_fps():
     config = config_module.normalize({
-        "shed_camera": {"enabled": "yes", "url": "rtsp://host/cam", "fps": "4"}})
-    assert config["shed_camera"] == {"enabled": True, "url": "rtsp://host/cam",
-                                     "fps": 4.0}
+        "shed_cameras": {"fps": 5, "cameras": {
+            "cam2": {"enabled": True, "url": "rtsp://host/2"},
+            "cam1": {"url": "rtsp://host/1", "fps": 22}}}})
+    assert list(config["shed_cameras"]["cameras"]) == ["cam1", "cam2"]
+    assert config["shed_cameras"]["cameras"]["cam1"] == {
+        "enabled": False, "url": "rtsp://host/1", "fps": 22.0}
+    assert config["shed_cameras"]["fps"] == 5.0
+    assert config["shed_cameras"]["cameras"]["cam2"]["fps"] == 5.0
 
 
 def test_shed_camera_fps_clamped():
-    config = config_module.normalize({"shed_camera": {"fps": 99}})
-    assert config["shed_camera"]["fps"] == 30.0
-    config = config_module.normalize({"shed_camera": {"fps": 0}})
-    assert config["shed_camera"]["fps"] == 1.0
+    config = config_module.normalize({"shed_cameras": {"cameras": {"a": {"fps": 99}}}})
+    assert config["shed_cameras"]["cameras"]["a"]["fps"] == 30.0
+    config = config_module.normalize({"shed_cameras": {"cameras": {"a": {"fps": 0}}}})
+    assert config["shed_cameras"]["cameras"]["a"]["fps"] == 1.0
+    config = config_module.normalize({"shed_cameras": {"fps": 99}})
+    assert config["shed_cameras"]["fps"] == 30.0
 
 
-def test_shed_camera_bad_type_rejected():
-    with pytest.raises(ValueError, match="shed_camera"):
-        config_module.normalize({"shed_camera": "on"})
+def test_shed_camera_legacy_block_becomes_cam1():
+    config = config_module.normalize({
+        "shed_camera": {"enabled": "yes", "url": "rtsp://host/cam", "fps": "4"}})
+    assert config["shed_cameras"]["cameras"]["cam1"] == {
+        "enabled": True, "url": "rtsp://host/cam", "fps": 4.0}
+    assert "shed_camera" not in config
+
+
+def test_shed_cameras_bad_types_rejected():
+    with pytest.raises(ValueError, match="shed_cameras"):
+        config_module.normalize({"shed_cameras": "on"})
+    with pytest.raises(ValueError, match="cameras"):
+        config_module.normalize({"shed_cameras": {"cameras": ["a"]}})
+    with pytest.raises(ValueError, match="shed_cameras.a"):
+        config_module.normalize({"shed_cameras": {"cameras": {"a": 3}}})
 
 
 def test_mount3d_view_defaults():
