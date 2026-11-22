@@ -972,7 +972,12 @@ class MainWindow(QMainWindow):
         for name, monitor in self.controller.monitors.items():
             entries[name] = monitor.status(now)
         self.heartbeats_panel.refresh(now, entries)
-        self.scope_panel.refresh(self._scope_data(now))
+        self._refresh_scope(now)
+
+    def _refresh_scope(self, now):
+        data = self._scope_data(now)
+        self.scope_panel.refresh(data)
+        self.mount3d_panel.set_figure(data.get("figure"))
 
     def _scope_data(self, now):
         mount_device = self.config["devices"].get("mount")
@@ -1022,7 +1027,7 @@ class MainWindow(QMainWindow):
             "mount3d_view", {"az": 200.0, "alt": 25.0})
         view["az"] = (float(view.get("az", 200.0)) + daz) % 360.0
         view["alt"] = max(-80.0, min(80.0, float(view.get("alt", 25.0)) + dalt))
-        self.scope_panel.refresh(self._scope_data(time.time()))
+        self._refresh_scope(time.time())
 
     def _refresh_all(self):
         interactive = self.controller.relay_actions_allowed()
