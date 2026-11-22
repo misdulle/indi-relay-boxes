@@ -13,10 +13,10 @@ DEC_COLOR = "#d32f2f"    # declination axis
 TUBE_COLOR = "#2e8b57"
 
 PIER_HEIGHT = 0.80    # m, vertical pier
-RA_LENGTH = 0.60      # m, polar (hour angle) bar, pointing at the NCP
+RA_LENGTH = 0.20      # m, polar (hour angle) bar, pointing at the NCP
 FALLBACK_LATITUDE = 45.0   # used when the mount reports no site latitude
 DEC_BACK = 0.15       # m, DEC bar extends this far on the counterweight side
-SADDLE_OFFSET = 0.40  # m, tube attachment offset along the DEC axis
+SADDLE_OFFSET = 0.20  # m, tube attachment offset along the DEC axis
 TUBE_HALF = 0.55      # m, half length of the drawn tube
 TUBE_WIDTHS = (13, 16, 21)   # telescopic look: wider towards the lens
 GROUND_RADIUS = 0.60  # m, ground disc at the base of the pier
@@ -88,6 +88,39 @@ def _pier_side_adjust(dec, pier):
     return dec
 
 
+def hour_angle_deg(lst_hours, ra_hours):
+    """Instrument hour angle HA = LST - RA, wrapped to (-180, 180] deg."""
+    return ((lst_hours - ra_hours) * 15.0 + 180.0) % 360.0 - 180.0
+
+
+def mechanical_axes(mount, lat):
+    """Tube + DEC axis from the reported mechanical angles, or None.
+
+    HA = TIME_LST.LST - EQUATORIAL_EOD_COORD.RA rotates the DEC assembly
+    about the polar axis (origin: scope pointing south on the meridian);
+    DEC rotates the tube about the DEC axis (0 deg = perpendicular to the
+    polar axis, i.e. pointing at the celestial equator).
+    """
+    ra, dec_deg, lst = mount.get("ra"), mount.get("dec"), mount.get("lst")
+    if ra is None or dec_deg is None or lst is None:
+        return None
+    lat_deg = lat if lat is not None else FALLBACK_LATITUDE
+    phi = math.radians(lat_deg)
+    pole = celestial_pole(lat_deg)
+    south = (math.sin(phi), 0.0, math.cos(phi))   # meridian celestial equator
+    east = (0.0, 1.0, 0.0)
+    h = math.radians(hour_angle_deg(lst, ra))
+    d = math.radians(dec_deg)
+    equator = vec_sub(vec_scale(south, math.cos(h)), vec_scale(east, math.sin(h)))
+    tube = vec_unit(vec_add(vec_scale(pole, math.sin(d)),
+                            vec_scale(equator, math.cos(d))))
+    dec = vec_unit(vec_add(vec_scale(east, math.cos(h)),
+                           vec_scale(south, math.sin(h))))
+    if mount.get("pier") == "west":
+        dec = vec_scale(dec, -1.0)
+    return tube, dec
+
+
 def project(point, view_az_deg, view_alt_deg, scale, center):
     """Orthographic projection; returns (x, y, depth) in screen points.
 
@@ -119,9 +152,9 @@ def _ground_disc(radius=GROUND_RADIUS, points=DISC_POINTS):
 def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     """Stick figure of the mount from its reported angles.
 
-    mount: dict like model.mount_state (ra, dec, az, alt, pier, parked).
-    site: {"lat": .., "lon": ..} or None.  Returns a dict with "segments",
-    "labels", "view" keys; empty when nothing is known.
+    mount: dict like model.mount_state (ra, dec, lst, az, alt, pier,
+    parked).  site: {"lat": .., "lon": ..} or None.  Returns a dict with
+    "segments", "labels", "view" keys; empty when nothing is known.
     """
     lat = None
     if site and site.get("lat"):
@@ -144,12 +177,17 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     segments.append(_seg(back, tip, RA_COLOR, 16))
     labels.append((vec_add(tip, vec_scale(ra_dir, 0.10)), "RA"))
 
-    tube_dir = _tube_direction(mount, lat)
-    if tube_dir is None:
-        return figure
-
-    ra_axis = ra_dir or (0.0, -1.0, 0.0)
-    dec = _pier_side_adjust(dec_axis(ra_axis, tube_dir), mount.get("pier"))
+    ra_axis = ra_dir
+    axes = None
+    if not mount.get("parked"):
+        axes = mechanical_axes(mount, lat)
+    if axes is not None:
+        tube_dir, dec = axes
+    else:
+        tube_dir = _tube_direction(mount, lat)
+        if tube_dir is None:
+            return figure
+        dec = _pier_side_adjust(dec_axis(ra_axis, tube_dir), mount.get("pier"))
     dec_start = vec_sub(head, vec_scale(dec, DEC_BACK))
     saddle = vec_add(head, vec_scale(dec, SADDLE_OFFSET))
     segments.append(_seg(dec_start, saddle, DEC_COLOR, 11))
@@ -172,13 +210,13 @@ def _tube_direction(mount, lat):
     """Best available pointing of the optical axis (unit vector or None)."""
     if mount.get("az") is not None and mount.get("alt") is not None:
         return dir_from_azalt(mount["az"], mount["alt"])
+    if mount.get("parked"):
+        return dir_from_azalt(180.0, 0.0)
     if (mount.get("ra") is not None and mount.get("dec") is not None
             and lat is not None):
         from .attitude import alt_az
         az, alt = alt_az(mount["ra"], mount["dec"], lat, 0.0)
         return dir_from_azalt(az, alt)
-    if mount.get("parked"):
-        return dir_from_azalt(180.0, 0.0)
     return None
 
 

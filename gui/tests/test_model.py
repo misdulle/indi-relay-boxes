@@ -216,9 +216,10 @@ def site_vector():
 
 def test_mount_state_reads_pointing_pier_and_park():
     model = IndiModel()
-    assert model.mount_state("EQMod Mount") == {"ra": None, "dec": None, "az": None,
-                                                "alt": None, "pier": None,
-                                                "parked": None, "online": False}
+    assert model.mount_state("EQMod Mount") == {"ra": None, "dec": None, "lst": None,
+                                                "az": None, "alt": None,
+                                                "pier": None, "parked": None,
+                                                "online": False}
     model.apply_vector(mount_coord_vector())
     model.apply_vector(pier_vector("west"))
     model.apply_vector(park_vector(True))
@@ -251,6 +252,31 @@ def test_mount_state_reads_horizontal_coord():
     assert state["az"] == 212.5
     assert state["alt"] == 33.75
     assert state["online"] is True
+
+
+def lst_vector(value="18.75"):
+    return vector_from_element(ET.fromstring(
+        '<defNumberVector device="EQMod Mount" name="TIME_LST" state="IPS_OK">'
+        '<oneNumber name="LST">%s</oneNumber>'
+        "</defNumberVector>" % value))
+
+
+def test_mount_state_reads_local_sidereal_time():
+    model = IndiModel()
+    assert model.mount_state("EQMod Mount")["lst"] is None
+    model.apply_vector(lst_vector())
+    state = model.mount_state("EQMod Mount")
+    assert state["lst"] == 18.75
+    assert state["online"] is True
+
+
+def test_hours_accepts_plain_and_colon_notation():
+    from indi_relay_gui.model import _hours
+    assert _hours(None) is None
+    assert _hours(18.75) == 18.75
+    assert _hours("18:45:00") == 18.75
+    assert _hours("-1:30") == -1.5
+    assert _hours("bogus") is None
 
 
 def test_site_coords():

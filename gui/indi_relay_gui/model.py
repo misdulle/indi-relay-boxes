@@ -4,6 +4,29 @@ from .indi import SWITCH_VECTOR
 
 HIDDEN_RELAY_NAMES = ("none",)
 
+
+def _hours(value):
+    """Hours as float; plain numbers pass through, HH:MM[:SS] converts."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    sign = -1.0 if text.startswith("-") else 1.0
+    parts = text.lstrip("+-").split(":")
+    try:
+        numbers = [float(part) for part in parts if part != ""]
+    except ValueError:
+        return None
+    if not numbers or len(numbers) > 3:
+        return None
+    hours = numbers[0]
+    if len(numbers) > 1:
+        hours += numbers[1] / 60.0
+    if len(numbers) > 2:
+        hours += numbers[2] / 3600.0
+    return sign * hours
+
 _MEMBER_VALUE_KEYS = {
     "SwitchVector": ("on",),
     "TextVector": ("text",),
@@ -166,13 +189,14 @@ class IndiModel:
         return {member["name"]: member["light"] for member in vector["members"].values()}
 
     def mount_state(self, device):
-        """Pointing of the EQMod mount: ra (hours), dec (deg), az/alt
-        (degrees, from HORIZONTAL_COORD when reported), pier side, parked.
+        """Pointing of the EQMod mount: ra (hours), dec (deg), local
+        sidereal time (hours, from TIME_LST), az/alt (degrees, from
+        HORIZONTAL_COORD when reported), pier side, parked.
         None fields = not reported (yet)."""
         if device is None:
             return None
-        state = {"ra": None, "dec": None, "az": None, "alt": None,
-                 "pier": None, "parked": None, "online": False}
+        state = {"ra": None, "dec": None, "lst": None, "az": None,
+                 "alt": None, "pier": None, "parked": None, "online": False}
         for name in ("EQUATORIAL_EOD_COORD", "EQUATORIAL_COORD"):
             coord = self.get(device, name)
             if coord is not None:
@@ -180,6 +204,10 @@ class IndiModel:
                 state["ra"] = coord["members"].get("RA", {}).get("value")
                 state["dec"] = coord["members"].get("DEC", {}).get("value")
                 break
+        time_lst = self.get(device, "TIME_LST")
+        if time_lst is not None:
+            state["online"] = True
+            state["lst"] = _hours(time_lst["members"].get("LST", {}).get("value"))
         horizontal = self.get(device, "HORIZONTAL_COORD")
         if horizontal is not None:
             state["online"] = True

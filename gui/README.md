@@ -268,23 +268,28 @@ blue, DEC axis red, tube green):
 
 - the **pillar** (80 cm, vertical) stands at the origin;
 - on top of the pillar, the **polar (hour angle) axis** is drawn as a
-  60 cm bar pointing at the celestial pole, fixed orientation - its
+  20 cm bar pointing at the celestial pole, fixed orientation - its
   inclination is the site latitude the mount reports
   (`GEOGRAPHIC_COORD`), e.g. 47.5° from the **horizontal** at
   latitude 47.5°N; when the mount reports no usable site latitude the
   bar is still drawn, using `FALLBACK_LATITUDE` = 45° (configure the
   latitude in the EQMod driver to get the exact inclination);
-- the **DEC axis** is exactly 90° from the polar axis (verified by
-  re-orthogonalization even in degenerate cases) and its rotation about
-  the polar axis follows the pointing; `TELESCOPE_PIER_SIDE` flips it so
-  the saddle sits on the real scope side of the pier (west of the pier
-  when parked, if PIER_WEST);
+- **Synchronisation with the mount angles** - when the mount reports
+  `EQUATORIAL_EOD_COORD.RA`, `TIME_LST.LST` and `EQUATORIAL_EOD_COORD.DEC`,
+  the figure moves mechanically: the hour angle `HA = LST - RA` (in
+  hours x 15°) is the rotation of the DEC assembly about the polar axis,
+  with its **origin south** (HA = 0 puts the scope on the meridian,
+  pointing south), and `DEC` is the rotation of the tube about the DEC
+  axis (0° = perpendicular to the polar axis, pointing at the celestial
+  equator); the DEC axis stays exactly 90° from the polar axis and
+  `TELESCOPE_PIER_SIDE` flips it so the saddle sits on the real scope
+  side of the pier (west of the pier when parked, if PIER_WEST);
+  while `TELESCOPE_PARK.PARK` is on the figure stays in the parked pose
+  (horizontal, south). Without those angles the figure falls back to
+  `HORIZONTAL_COORD` AZ/ALT, then to the parked pose;
 - the **tube** lies perpendicular to the DEC axis, at `SADDLE_OFFSET` =
-  0.40 m from the polar-axis/DEC-axis intersection, and rotates about the
-  DEC axis; its direction uses (in order of preference)
-  `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates,
-  then the parked pose (horizontal, pointing south) when
-  `TELESCOPE_PARK.PARK` is on; it is drawn **telescopic** (three sections,
+  0.20 m from the polar-axis/DEC-axis intersection, and rotates about the
+  DEC axis; it is drawn **telescopic** (three sections,
   widening towards the front), the front lens is materialized as a filled
   disc at the pointing end, the camera as a filled square at the back end;
 - a **ground disc** (semi-transparent horizontal disc, `GROUND_RADIUS` =
@@ -304,8 +309,8 @@ blue, DEC axis red, tube green):
 where you look at the mount); 200/25 gives a south-eastern, slightly
 raised viewpoint matching the shed orientation. Tuning the stick lengths
 is a matter of editing the constants at the top of
-`indi_relay_gui/mount3d.py` (`PIER_HEIGHT` 0.8 m, `RA_LENGTH` 0.6 m,
-`SADDLE_OFFSET` 0.4 m, `TUBE_HALF`, ...).
+`indi_relay_gui/mount3d.py` (`PIER_HEIGHT` 0.8 m, `RA_LENGTH` 0.2 m,
+`SADDLE_OFFSET` 0.2 m, `TUBE_HALF`, ...).
 
 ## Shed camera
 
