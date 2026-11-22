@@ -21,6 +21,8 @@ def mock_qt(monkeypatch):
     qtgui.QPen = MagicMock()
     qtgui.QPolygonF = MagicMock()
     qtgui.QKeySequence = MagicMock()
+    qtgui.QImage = MagicMock()
+    qtgui.QPixmap = MagicMock()
     qtwidgets = types.ModuleType("PyQt5.QtWidgets")
     for name in ("QAbstractItemView", "QComboBox", "QFormLayout", "QGridLayout", "QGroupBox",
                  "QHBoxLayout", "QLabel", "QMainWindow", "QMessageBox", "QPlainTextEdit",

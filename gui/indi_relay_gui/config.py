@@ -20,6 +20,8 @@ DEFAULTS = {
     "imu_optical_axis": "+x",          # IMU body axis pointing along the scope tube
     "scope_view_rotation": 200.0,      # top-view azimuths rotated by this many degrees
                                        # clockwise (200 = south up + 20 for the shed)
+    "shed_camera": {"enabled": False, "url": "", "fps": 8},
+    "mount3d_view": {"az": 200.0, "alt": 25.0},
     "pi5_wake": {"enabled": False, "host": "192.168.1.23", "port": 80,
                  "user": "admin", "password": "", "relay": 1,
                  "timeout_s": 3, "wait_s": 90},
@@ -70,6 +72,21 @@ def normalize(raw):
     config["imu_optical_axis"] = axis
     config["scope_view_rotation"] = float(
         config.get("scope_view_rotation", DEFAULTS["scope_view_rotation"]))
+    cam = config.get("shed_camera") or {}
+    if not isinstance(cam, dict):
+        raise ValueError("shed_camera: expected a mapping")
+    config["shed_camera"] = {
+        "enabled": bool(cam.get("enabled", False)),
+        "url": str(cam.get("url", "")),
+        "fps": min(30.0, max(1.0, float(cam.get("fps", 8)))),
+    }
+    view3d = config.get("mount3d_view") or {}
+    if not isinstance(view3d, dict):
+        raise ValueError("mount3d_view: expected a mapping")
+    config["mount3d_view"] = {
+        "az": float(view3d.get("az", 200.0)) % 360.0,
+        "alt": max(-80.0, min(80.0, float(view3d.get("alt", 25.0)))),
+    }
     wake = config.get("pi5_wake") or {}
     if not isinstance(wake, dict):
         raise ValueError("pi5_wake: expected a mapping")

@@ -216,7 +216,8 @@ def site_vector():
 
 def test_mount_state_reads_pointing_pier_and_park():
     model = IndiModel()
-    assert model.mount_state("EQMod Mount") == {"ra": None, "dec": None, "pier": None,
+    assert model.mount_state("EQMod Mount") == {"ra": None, "dec": None, "az": None,
+                                                "alt": None, "pier": None,
                                                 "parked": None, "online": False}
     model.apply_vector(mount_coord_vector())
     model.apply_vector(pier_vector("west"))
@@ -233,6 +234,23 @@ def test_mount_state_park_switch_reports_unparked():
     model = IndiModel()
     model.apply_vector(park_vector(False))
     assert model.mount_state("EQMod Mount")["parked"] is False
+
+
+def horizontal_vector():
+    return vector_from_element(ET.fromstring(
+        '<defNumberVector device="EQMod Mount" name="HORIZONTAL_COORD" state="IPS_OK">'
+        '<oneNumber name="AZ">212.5</oneNumber>'
+        '<oneNumber name="ALT">33.75</oneNumber>'
+        "</defNumberVector>"))
+
+
+def test_mount_state_reads_horizontal_coord():
+    model = IndiModel()
+    model.apply_vector(horizontal_vector())
+    state = model.mount_state("EQMod Mount")
+    assert state["az"] == 212.5
+    assert state["alt"] == 33.75
+    assert state["online"] is True
 
 
 def test_site_coords():

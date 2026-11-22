@@ -1,0 +1,116 @@
+import math
+
+from indi_relay_gui import mount3d
+
+
+EPS = 1e-6
+
+
+def approx(v, other):
+    assert all(abs(a - b) < EPS for a, b in zip(v, other))
+
+
+def test_dir_from_azalt_cardinal_directions():
+    approx(mount3d.dir_from_azalt(0.0, 0.0), (-1.0, 0.0, 0.0))   # north
+    approx(mount3d.dir_from_azalt(90.0, 0.0), (0.0, 1.0, 0.0))   # east
+    approx(mount3d.dir_from_azalt(180.0, 0.0), (1.0, 0.0, 0.0))  # south
+    approx(mount3d.dir_from_azalt(270.0, 0.0), (0.0, -1.0, 0.0))  # west
+    approx(mount3d.dir_from_azalt(0.0, 90.0), (0.0, 0.0, 1.0))   # zenith
+
+
+def test_celestial_pole_northern_hemisphere():
+    az, alt = 0.0, 48.2
+    pole = mount3d.celestial_pole(48.2)
+    expected = mount3d.dir_from_azalt(az, alt)
+    approx(pole, expected)
+    assert pole[2] == math.sin(math.radians(48.2))
+
+
+def test_celestial_pole_southern_hemisphere():
+    pole = mount3d.celestial_pole(-33.9)
+    approx(pole, mount3d.dir_from_azalt(180.0, 33.9))
+
+
+def test_dec_axis_perpendicular_and_unit():
+    ra_axis = mount3d.dir_from_azalt(0.0, 48.2)
+    tube = mount3d.dir_from_azalt(180.0, 0.0)
+    dec = mount3d.dec_axis(ra_axis, tube)
+    assert abs(mount3d.vec_norm(dec) - 1.0) < EPS
+    assert abs(mount3d.vec_dot(dec, ra_axis)) < EPS
+    assert abs(mount3d.vec_dot(dec, tube)) < EPS
+
+
+def test_dec_axis_degenerate_fallback():
+    same = mount3d.dir_from_azalt(45.0, 10.0)
+    dec = mount3d.dec_axis(same, same)
+    assert dec == (0.0, 1.0, 0.0)
+
+
+def test_project_origin_at_center():
+    u, v, depth = mount3d.project((0.0, 0.0, 0.0), 200.0, 25.0, 100.0, (50, 40))
+    assert (u, v, depth) == (50.0, 40.0, 0.0)
+
+
+def test_project_depth_grows_with_distance_from_camera():
+    # Camera sits at azimuth 200; a point towards az 200 is closer than one
+    # at az 20 (opposite side).
+    near = mount3d.project(mount3d.dir_from_azalt(200.0, 0.0), 200.0, 25.0, 1.0, (0, 0))
+    far = mount3d.project(mount3d.dir_from_azalt(20.0, 0.0), 200.0, 25.0, 1.0, (0, 0))
+    assert near[2] < far[2]
+
+
+def test_tube_direction_prefers_horizontal_coord():
+    direction = mount3d._tube_direction(
+        {"az": 100.0, "alt": 45.0, "ra": 1.0, "dec": 1.0, "parked": True}, 48.2)
+    approx(direction, mount3d.dir_from_azalt(100.0, 45.0))
+
+
+def test_tube_direction_falls_back_to_equatorial():
+    from indi_relay_gui.attitude import alt_az
+    az, alt = alt_az(18.5, 38.7939, 48.2, 0.0)
+    direction = mount3d._tube_direction({"ra": 18.5, "dec": 38.7939}, 48.2)
+    approx(direction, mount3d.dir_from_azalt(az, alt))
+
+
+def test_tube_direction_parked_reference():
+    approx(mount3d._tube_direction({"parked": True}, None),
+           mount3d.dir_from_azalt(180.0, 0.0))
+
+
+def test_tube_direction_unknown():
+    assert mount3d._tube_direction({}, None) is None
+
+
+def test_build_figure_parked_has_tube_pointing_south():
+    figure = mount3d.build_figure(
+        {"parked": True, "ra": None, "dec": None, "az": None, "alt": None,
+         "pier": "west"},
+        {"lat": 48.2, "lon": 7.6})
+    assert len(figure["segments"]) > 2
+    south = mount3d.dir_from_azalt(180.0, 0.0)
+    tube = max(figure["segments"], key=lambda s: s["width"])
+    direction = mount3d.vec_sub(tube["b"], tube["a"])
+    approx(mount3d.vec_unit(direction), south)
+    labels = [text for _, text in figure["labels"]]
+    assert "lens" in labels and "camera" in labels and "pier" in labels
+
+
+def test_build_figure_without_pointing_only_pier_and_ra():
+    figure = mount3d.build_figure({}, {"lat": 48.2, "lon": 7.6})
+    assert len(figure["segments"]) == 2      # pier + RA axis
+    assert [text for _, text in figure["labels"]] == ["pier", "RA"]
+    figure = mount3d.build_figure({}, None)
+    assert len(figure["segments"]) == 1      # pier only
+
+
+def test_sort_for_draws_far_first():
+    figure = mount3d.build_figure({"az": 90.0, "alt": 0.0}, {"lat": 48.2})
+    ordered = mount3d.sort_for_drawing(figure)
+    view = mount3d.dir_from_azalt(200.0, 25.0)
+
+    def depth(seg):
+        return mount3d.vec_dot(
+            mount3d.vec_scale(mount3d.vec_add(seg["a"], seg["b"]), 0.5), view)
+
+    depths = [depth(seg) for seg in ordered]
+    assert depths == sorted(depths)

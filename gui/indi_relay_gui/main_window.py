@@ -5,7 +5,8 @@ import time
 import math
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QKeySequence, QPainter, QPen, QPolygonF
+from PyQt5.QtGui import (QBrush, QColor, QImage, QKeySequence, QPainter, QPen,
+                         QPixmap, QPolygonF)
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QShortcut,
@@ -13,6 +14,7 @@ from PyQt5.QtWidgets import (
 
 from .attitude import (alt_az, angle_between, format_dec, format_ra,
                        optical_axis, quat_angle)
+from . import mount3d
 from .controller import Controller, Mode
 from .indi import IndiClient
 from .model import IndiModel
@@ -346,10 +348,13 @@ class ScopePanel(QGroupBox):
         layout.addWidget(self.readout)
         self.canvas = ScopeCanvas()
         layout.addWidget(self.canvas, 1)
+        self.canvas3d = Mount3DCanvas()
+        layout.addWidget(self.canvas3d, 1)
 
     def refresh(self, data):
         self.canvas.data = dict(data)
         self.canvas.update()
+        self.canvas3d.set_figure(data.get("figure"))
         mount = data.get("mount") or {}
         lines = ["mount  RA %s  DEC %s  pier %s%s" % (
             format_ra(mount.get("ra")), format_dec(mount.get("dec")),
@@ -378,6 +383,100 @@ class ScopePanel(QGroupBox):
             parts.append("difference %.1f" % data["discrepancy"])
         lines.append("point  " + ("; ".join(parts) if parts else "waiting"))
         self.readout.setText("\n".join(lines))
+
+
+class Mount3DCanvas(QWidget):
+    """Simple orthographic 3D stick figure of the german equatorial mount."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(170)
+        self.figure = {"segments": [], "labels": [], "view": (200.0, 25.0)}
+
+    def set_figure(self, figure):
+        if figure is not None:
+            self.figure = figure
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
+        view_az, view_alt = self.figure.get("view", (200.0, 25.0))
+        center = (rect.center().x(), rect.center().y() + rect.height() * 0.18)
+        scale = min(rect.width(), rect.height()) * 0.25
+        painter.setPen(QPen(QColor("#777777")))
+        for point, text in self.figure.get("labels", []):
+            u, v, _ = mount3d.project(point, view_az, view_alt, scale, center)
+            painter.drawText(QPointF(u, v), text)
+        for segment in mount3d.sort_for_drawing(self.figure):
+            ua, va, _ = mount3d.project(segment["a"], view_az, view_alt, scale, center)
+            ub, vb, _ = mount3d.project(segment["b"], view_az, view_alt, scale, center)
+            pen = QPen(QColor(segment["color"]))
+            pen.setWidthF(max(1.5, segment["width"] * scale / 260.0))
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(ua, va), QPointF(ub, vb))
+
+
+class CamPanel(QGroupBox):
+    """RTSP view of the camera inside the shed (low fps, low CPU)."""
+
+    frame_received = pyqtSignal(object)
+    status_changed = pyqtSignal(bool, str)
+
+    def __init__(self, config, log, parent=None):
+        super().__init__("Shed camera", parent)
+        self.setAlignment(Qt.AlignHCenter)
+        self._log = log
+        self._reader = None
+        self.view = QLabel("camera disabled")
+        self.view.setAlignment(Qt.AlignCenter)
+        self.view.setMinimumHeight(150)
+        self.view.setStyleSheet(
+            "background: #202020; color: #909090; font-size: 9pt;")
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.view, 1)
+        self.frame_received.connect(self._on_frame)
+        self.status_changed.connect(self._on_status)
+        self.restart(config)
+
+    def restart(self, config):
+        if self._reader is not None:
+            previous = self._reader
+            self._reader = None
+            previous.stop()
+        settings = config.get("shed_camera") or {}
+        if not settings.get("enabled") or not settings.get("url"):
+            self.view.setText("camera disabled")
+            return
+        from .camera import RtspReader, strip_url_credentials
+        self._log("camera: connecting to %s"
+                  % strip_url_credentials(settings.get("url")))
+        self._reader = RtspReader(
+            settings["url"], settings.get("fps", 8),
+            on_frame=self.frame_received.emit,
+            on_status=self.status_changed.emit)
+        self._reader.start()
+
+    def stop(self):
+        if self._reader is not None:
+            self._reader.stop()
+            self._reader = None
+
+    def _on_frame(self, frame):
+        if frame is None or frame.ndim != 3:
+            return
+        height, width = frame.shape[:2]
+        image = QImage(frame.data, width, height, int(frame.strides[0]),
+                       QImage.Format_BGR888).copy()
+        self.view.setPixmap(QPixmap.fromImage(image).scaled(
+            self.view.size(), Qt.KeepAspectRatio, Qt.FastTransformation))
+
+    def _on_status(self, ok, message):
+        if not ok:
+            self.view.setPixmap(QPixmap())
+            self.view.setText(message)
 
 
 class RoofPanel(QGroupBox):
@@ -627,9 +726,11 @@ class MainWindow(QMainWindow):
         self.roof_panel = RoofPanel()
         self.mode_panel = ModePanel()
         self.scope_panel = ScopePanel()
+        self.cam_panel = CamPanel(self.config, self.log)
         middle_layout.addWidget(self.roof_panel)
         middle_layout.addWidget(self.mode_panel)
         middle_layout.addWidget(self.scope_panel, 1)
+        middle_layout.addWidget(self.cam_panel, 1)
         splitter.addWidget(middle)
 
         right = QWidget()
@@ -806,7 +907,7 @@ class MainWindow(QMainWindow):
         data = {"mount": self.model.mount_state(mount_device) or {},
                 "quat": None, "quat_age": None, "measured": None,
                 "predicted": None, "discrepancy": None, "reference": None,
-                "park_angle": None, "rotation":
+                "park_angle": None, "figure": None, "rotation":
                 float(self.config.get("scope_view_rotation", 200.0))}
         monitor = None
         for candidate in self.controller.monitors.values():
@@ -832,6 +933,10 @@ class MainWindow(QMainWindow):
             data["reference"] = (180.0, 0.0)   # parked: horizontal, pointing south
         mount = data["mount"]
         site = self.model.site_coords(mount_device)
+        view3d = self.config.get("mount3d_view") or {"az": 200.0, "alt": 25.0}
+        data["figure"] = mount3d.build_figure(
+            mount, site,
+            float(view3d.get("az", 200.0)), float(view3d.get("alt", 25.0)))
         if (mount.get("ra") is not None and mount.get("dec") is not None
                 and site and (site["lat"] or site["lon"])):
             data["predicted"] = alt_az(mount["ra"], mount["dec"],
@@ -867,6 +972,7 @@ class MainWindow(QMainWindow):
             self.log("config reload failed: %s" % error)
             return
         self.controller.config = self.config
+        self.cam_panel.restart(self.config)
         self.log("config reloaded from %s" % self.config_path)
         self._refresh_all()
 
@@ -879,6 +985,7 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.Yes:
                 event.ignore()
                 return
+        self.cam_panel.stop()
         self.controller.shutdown()
         if self.client is not None:
             self.client.close()

@@ -140,6 +140,15 @@ imu_optical_axis: +x   # IMU body axis that looks along the tube
 scope_view_rotation: 200   # top view rotated 200 deg clockwise: south up,
                            # plus 20 deg for the shed orientation
 
+mount3d_view:          # viewpoint of the 3D mount stick figure
+  az: 200              # camera azimuth (deg): looks at the mount from here
+  alt: 25              # camera altitude (deg), -80..80
+
+shed_camera:           # RTSP view of a camera in the shed (see below)
+  enabled: false
+  url: rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2
+  fps: 8               # displayed frames per second, 1-30
+
 relay_exclude_names: [none]   # relays with these PORT_NAMES are not shown
 
 pi5_wake:              # direct HTTP switch of the pi5 power relay, see
@@ -245,6 +254,44 @@ side view (altitude).
 If site coordinates are missing or zero, only the IMU pointer is drawn;
 without a quaternion check, only the readouts.
 
+### 3D mount view
+
+Below the two projections the mount itself is drawn as a small stick
+figure (orthographic, no GPU/3D library), oriented by angles:
+
+- the pier stands at the origin;
+- the **RA axis** points to the celestial pole, computed from the site
+  latitude the mount reports (`GEOGRAPHIC_COORD`);
+- the **tube** direction uses (in order of preference)
+  `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates, then the
+  parked pose (horizontal, pointing south) when `TELESCOPE_PARK.PARK` is
+  on;
+- the **DEC housing** connects RA axis and tube; the tube is labelled
+  `lens` (pointing) and `camera` (back end).
+
+`mount3d_view.az` / `mount3d_view.alt` set the camera position (from
+where you look at the mount); 200/25 gives a south-eastern, slightly
+raised viewpoint matching the shed orientation. Tuning the stick lengths
+is a matter of editing the constants at the top of
+`indi_relay_gui/mount3d.py`.
+
+## Shed camera
+
+The middle panel can embed a live RTSP view of a camera in the shed
+(`shed_camera.enabled: true`). It runs on a dedicated background thread
+using OpenCV (`pip install opencv-python-headless` is needed):
+
+- to keep the CPU load low (typically < 5% of one core), the reader
+  continuously *grabs* the stream - which stays on the live edge - but only
+  *retrieves/decodes a frame* at `fps` (default 8, clamped to 1-30);
+- use the camera's **substream** (second channel, usually a few hundred
+  kbps / small resolution) for the GUI URL, e.g.
+  `rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2` on Hikvision;
+- the stream is read over TCP (`rtsp_transport;tcp`) to avoid UDP packet
+  loss artefacts;
+- on failure the view shows the reason and reconnects every 5 s; the URL
+  is never written to the log (credentials stripped).
+
 ### Adding new checks
 
 Add a class to `indi_relay_gui/checks.py` with `run_check(now) ->
@@ -260,6 +307,8 @@ anything doable in a sequence can be a reaction.
         indi.py          INDI client + XML stream parser
         model.py         property tree (relays, roof state, safety lights)
         attitude.py      quaternion / sky math for the position view
+        mount3d.py       3D stick figure of the GEM mount (pure python)
+        camera.py        low-fps RTSP reader thread (OpenCV, optional)
         sequence.py      step engine (used by starting/stopping and recoveries)
         checks.py        ping/udp/quaternion checks + scheduler
         controller.py    operating-mode state machine

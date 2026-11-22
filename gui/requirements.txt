@@ -1,2 +1,4 @@
 PyQt5>=5.15
 PyYAML>=5.4
+# only needed for the "Shed camera" RTSP view (optional)
+# opencv-python-headless>=4.5

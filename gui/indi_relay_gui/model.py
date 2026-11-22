@@ -166,12 +166,13 @@ class IndiModel:
         return {member["name"]: member["light"] for member in vector["members"].values()}
 
     def mount_state(self, device):
-        """Pointing of the EQMod mount: ra (hours), dec (deg), pier side,
-        parked.  None fields = not reported (yet)."""
+        """Pointing of the EQMod mount: ra (hours), dec (deg), az/alt
+        (degrees, from HORIZONTAL_COORD when reported), pier side, parked.
+        None fields = not reported (yet)."""
         if device is None:
             return None
-        state = {"ra": None, "dec": None, "pier": None, "parked": None,
-                 "online": False}
+        state = {"ra": None, "dec": None, "az": None, "alt": None,
+                 "pier": None, "parked": None, "online": False}
         for name in ("EQUATORIAL_EOD_COORD", "EQUATORIAL_COORD"):
             coord = self.get(device, name)
             if coord is not None:
@@ -179,6 +180,11 @@ class IndiModel:
                 state["ra"] = coord["members"].get("RA", {}).get("value")
                 state["dec"] = coord["members"].get("DEC", {}).get("value")
                 break
+        horizontal = self.get(device, "HORIZONTAL_COORD")
+        if horizontal is not None:
+            state["online"] = True
+            state["az"] = horizontal["members"].get("AZ", {}).get("value")
+            state["alt"] = horizontal["members"].get("ALT", {}).get("value")
         pier = self.get(device, "TELESCOPE_PIER_SIDE")
         if pier is not None:
             state["online"] = True

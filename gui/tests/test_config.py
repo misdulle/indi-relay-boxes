@@ -26,6 +26,10 @@ def test_load_example_config():
     assert config["pi5_wake"]["enabled"] is True
     assert config["pi5_wake"]["relay"] == 1
     assert config["pi5_wake"]["ping_host"] == "192.168.1.29"
+    assert config["mount3d_view"] == {"az": 200.0, "alt": 25.0}
+    assert config["shed_camera"] == {"enabled": False,
+                                     "url": "rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2",
+                                     "fps": 8.0}
 
 
 def test_defaults_fill_missing_sections():
@@ -40,6 +44,46 @@ def test_defaults_fill_missing_sections():
 def test_scope_view_rotation_normalized():
     config = config_module.normalize({"scope_view_rotation": "175"})
     assert config["scope_view_rotation"] == 175.0
+
+
+def test_shed_camera_defaults_off():
+    config = config_module.normalize({})
+    assert config["shed_camera"] == {"enabled": False, "url": "", "fps": 8.0}
+
+
+def test_shed_camera_normalized():
+    config = config_module.normalize({
+        "shed_camera": {"enabled": "yes", "url": "rtsp://host/cam", "fps": "4"}})
+    assert config["shed_camera"] == {"enabled": True, "url": "rtsp://host/cam",
+                                     "fps": 4.0}
+
+
+def test_shed_camera_fps_clamped():
+    config = config_module.normalize({"shed_camera": {"fps": 99}})
+    assert config["shed_camera"]["fps"] == 30.0
+    config = config_module.normalize({"shed_camera": {"fps": 0}})
+    assert config["shed_camera"]["fps"] == 1.0
+
+
+def test_shed_camera_bad_type_rejected():
+    with pytest.raises(ValueError, match="shed_camera"):
+        config_module.normalize({"shed_camera": "on"})
+
+
+def test_mount3d_view_defaults():
+    config = config_module.normalize({})
+    assert config["mount3d_view"] == {"az": 200.0, "alt": 25.0}
+
+
+def test_mount3d_view_normalized():
+    config = config_module.normalize({"mount3d_view": {"az": 560, "alt": -90}})
+    assert config["mount3d_view"]["az"] == 200.0
+    assert config["mount3d_view"]["alt"] == -80.0
+
+
+def test_mount3d_view_bad_type_rejected():
+    with pytest.raises(ValueError, match="mount3d_view"):
+        config_module.normalize({"mount3d_view": [200, 25]})
 
 
 def test_relay_exclude_names_are_normalized():
