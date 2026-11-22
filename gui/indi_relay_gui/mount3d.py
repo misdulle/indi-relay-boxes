@@ -116,8 +116,7 @@ def mechanical_axes(mount, lat):
                             vec_scale(equator, math.cos(d))))
     dec = vec_unit(vec_add(vec_scale(east, math.cos(h)),
                            vec_scale(south, math.sin(h))))
-    if mount.get("pier") == "west":
-        dec = vec_scale(dec, -1.0)
+    dec = _pier_side_adjust(dec, mount.get("pier"))
     return tube, dec
 
 

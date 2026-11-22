@@ -263,6 +263,17 @@ def test_mechanical_axes_unknown_pier_keeps_base_orientation():
     approx(dec, (0.0, 1.0, 0.0))
 
 
+def test_mechanical_axes_saddle_stays_on_pier_side_beyond_meridian():
+    # HA = 135 deg: the saddle must stay on the reported pier side, like
+    # the AZ/ALT-derived path (same _pier_side_adjust rule).
+    _, dec = mount3d.mechanical_axes(
+        {"ra": 5.0, "dec": 10.0, "lst": 14.0, "pier": "west"}, 47.5)
+    assert dec[1] < 0.0     # saddle west of the pier
+    _, dec = mount3d.mechanical_axes(
+        {"ra": 5.0, "dec": 10.0, "lst": 14.0, "pier": "east"}, 47.5)
+    assert dec[1] > 0.0     # saddle east of the pier
+
+
 def test_mechanical_axes_requires_all_angles():
     assert mount3d.mechanical_axes({"ra": 5.0, "dec": 10.0}, 47.5) is None
     assert mount3d.mechanical_axes({"lst": 5.0, "dec": 10.0}, 47.5) is None
