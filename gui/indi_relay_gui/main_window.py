@@ -122,11 +122,13 @@ class RelayPanel(QGroupBox):
                 button = QPushButton(port["label"])
                 button.setCheckable(True)
                 button.setMinimumHeight(34)
+                button.setMaximumWidth(120)
                 button.setToolTip(port["name"])
                 button.clicked.connect(
                     lambda checked, member=port["name"]:
                     self.port_toggled.emit(device, member, checked))
-                self._grid.addWidget(button, index // self._columns, index % self._columns)
+                self._grid.addWidget(button, index // self._columns, index % self._columns,
+                             Qt.AlignHCenter)
                 self._buttons[port["name"]] = button
             button.setText(port["label"])
             button.setChecked(port["on"])
@@ -629,7 +631,7 @@ class MainWindow(QMainWindow):
         self._ticker.timeout.connect(self._tick)
         self._ticker.start(500)
 
-        splitter.setSizes([440, 320, 380])
+        splitter.setSizes([280, 380, 440])
         self.setCentralWidget(central)
 
         self.connection_label = QLabel("disconnected")
