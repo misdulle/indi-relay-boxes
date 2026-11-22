@@ -21,6 +21,7 @@ TUBE_HALF = 0.55      # m, half length of the drawn tube
 TUBE_WIDTHS = (13, 16, 21)   # telescopic look: wider towards the lens
 GROUND_RADIUS = 0.60  # m, ground disc at the base of the pier
 DISC_POINTS = 36
+COMPASS_GAP = 0.08    # m, letter offset outside the ground disc rim
 
 
 def vec_add(a, b):
@@ -127,8 +128,8 @@ def project(point, view_az_deg, view_alt_deg, scale, center):
     """
     view_dir = dir_from_azalt(view_az_deg, view_alt_deg)
     forward = vec_scale(view_dir, -1.0)
-    right = vec_unit(vec_cross((0.0, 0.0, 1.0), forward))
-    up = vec_cross(forward, right)
+    right = vec_unit(vec_cross(forward, (0.0, 0.0, 1.0)))   # true screen right
+    up = vec_unit(vec_cross(right, forward))
     u = vec_dot(point, right) * scale + center[0]
     v = -vec_dot(point, up) * scale + center[1]
     depth = -vec_dot(point, view_dir)
@@ -146,6 +147,14 @@ def _ground_disc(radius=GROUND_RADIUS, points=DISC_POINTS):
             for i in range(points)]
     return {"points": ring, "color": "#77848c", "alpha": 70,
             "edge": "#3f484d"}
+
+
+def _compass_labels():
+    """N/E/S/W letters just outside the ground disc rim."""
+    distance = GROUND_RADIUS + COMPASS_GAP
+    return [(vec_scale(dir_from_azalt(az, 0.0), distance), letter)
+            for az, letter in ((0.0, "N"), (90.0, "E"), (180.0, "S"),
+                               (270.0, "W"))]
 
 
 def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
@@ -167,6 +176,7 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     origin = (0.0, 0.0, 0.0)
     head = (0.0, 0.0, PIER_HEIGHT)
     figure["polygons"].append(_ground_disc())
+    labels.extend(_compass_labels())
     segments.append(_seg(origin, head, PIER_COLOR, 15))
     labels.append((vec_scale(head, 1.02), "pier"))
 

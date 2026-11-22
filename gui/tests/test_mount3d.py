@@ -68,6 +68,16 @@ def test_pier_side_flips_dec_axis_saddle_side():
     assert dec_bar["b"][1] > 0.0     # saddle on the east side
 
 
+def test_projection_is_not_mirrored():
+    # Camera north of the mount looking south (view az = 0): east must
+    # land on the LEFT of the screen, west on the right, zenith up.
+    east = mount3d.project((0.0, 1.0, 0.0), 0.0, 0.0, 1.0, (0, 0))[0]
+    west = mount3d.project((0.0, -1.0, 0.0), 0.0, 0.0, 1.0, (0, 0))[0]
+    assert east < 0.0 < west
+    zenith_v = mount3d.project((0.0, 0.0, 1.0), 0.0, 0.0, 1.0, (0, 0))[1]
+    assert zenith_v < 0.0
+
+
 def test_project_origin_at_center():
     u, v, depth = mount3d.project((0.0, 0.0, 0.0), 200.0, 25.0, 100.0, (50, 40))
     assert (u, v, depth) == (50.0, 40.0, 0.0)
@@ -183,11 +193,20 @@ def test_build_figure_parked_has_tube_pointing_south():
     approx(camera["point"], tail)   # camera at the back end
 
 
+def test_ground_disc_carries_compass_letters():
+    figure = mount3d.build_figure({}, {"lat": 47.5, "lon": 0.0})
+    letters = {text: point for point, text in figure["labels"]}
+    distance = mount3d.GROUND_RADIUS + mount3d.COMPASS_GAP
+    for az, letter in ((0.0, "N"), (90.0, "E"), (180.0, "S"), (270.0, "W")):
+        approx(letters[letter],
+               mount3d.vec_scale(mount3d.dir_from_azalt(az, 0.0), distance))
+
+
 def test_polar_axis_always_drawn():
     figure = mount3d.build_figure({}, {"lat": 48.2, "lon": 7.6})
     assert len(figure["segments"]) == 2      # pier + RA axis (ground is a polygon)
     assert len(figure["polygons"]) == 1 and len(figure["polygons"][0]["points"]) == mount3d.DISC_POINTS
-    assert [text for _, text in figure["labels"]] == ["pier", "RA"]
+    assert [text for _, text in figure["labels"]][4:] == ["pier", "RA"]
     figure = mount3d.build_figure({}, None)  # no site: RA at the fallback latitude
     assert len(figure["segments"]) == 2      # pier + RA axis + ground polygon
     ra_bar = next(s for s in figure["segments"] if s["color"] == mount3d.RA_COLOR)

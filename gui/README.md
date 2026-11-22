@@ -293,7 +293,10 @@ blue, DEC axis red, tube green):
   widening towards the front), the front lens is materialized as a filled
   disc at the pointing end, the camera as a filled square at the back end;
 - a **ground disc** (semi-transparent horizontal disc, `GROUND_RADIUS` =
-  0.6 m) sits at the base of the pier;
+  0.6 m) sits at the base of the pier, with **N/E/S/W letters on the rim**
+  so the orientation is unambiguous (the projection is not mirrored:
+  when viewed from the south, west is on the left, like looking at the
+  real mount from behind the pier);
 - **Orbiting the view** - right-click-drag on the 2D projections or on the
   3D figure itself: horizontal movement swings the 3D camera azimuth,
   vertical movement changes its altitude. The result updates `mount3d_view`
