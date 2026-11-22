@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 
+from .attitude import parse_quaternion
 from .sequence import StepContext, StepError, execute
 
 
@@ -133,7 +134,10 @@ class UdpMonitor:
             if data:
                 self._last_rx = time.time()
                 self._last_data_ok = True
-                self._message = "last datagram from %s (%d bytes)" % (addr[0], len(data))
+                self._handle_datagram(data, addr)
+
+    def _handle_datagram(self, data, addr):
+        self._message = "last datagram from %s (%d bytes)" % (addr[0], len(data))
 
     def run_check(self, now):
         if self._sock is None:
@@ -153,7 +157,51 @@ class UdpMonitor:
                 "message": message}
 
 
-FACTORIES = {"ping": PingMonitor, "udp": UdpMonitor}
+class QuaternionMonitor(UdpMonitor):
+    """Listens to the IMU's quaternion broadcast (UDP) and decodes it.
+
+    Liveness is identical to the plain udp monitor (stale datagrams fail);
+    on top of it the last decoded quaternion (w, x, y, z) and its reception
+    time are exposed for the scope visualization.
+    """
+
+    kind = "quaternion"
+
+    def __init__(self, spec):
+        super().__init__(spec)
+        self.quaternion = None
+        self.quaternion_at = None
+        self.bad_datagrams = 0
+
+    def _handle_datagram(self, data, addr):
+        parsed = parse_quaternion(data)
+        if parsed is None:
+            self.bad_datagrams += 1
+            self._message = ("unparsable datagram from %s (%d bytes), "
+                             "keeping last quaternion" % (addr[0], len(data)))
+            return
+        self.quaternion = parsed
+        self.quaternion_at = time.time()
+        self.bad_datagrams = 0
+        self._message = ("quaternion from %s (w<%.3f> x<%.3f> y<%.3f> z<%.3f>)"
+                         % ((addr[0],) + parsed))
+
+    def run_check(self, now):
+        if self._sock is None or self.quaternion_at is None:
+            return False, self._message
+        if now - self.quaternion_at > self.timeout_s:
+            return False, "last quaternion %.0f s ago" % (now - self.quaternion_at)
+        return True, self._message
+
+    def status(self, now):
+        if self._sock is None or self.quaternion_at is None:
+            return {"ok": False, "known": False, "age": None, "message": self._message}
+        return {"ok": True, "known": True, "age": now - self.quaternion_at,
+                "message": self._message}
+
+
+FACTORIES = {"ping": PingMonitor, "udp": UdpMonitor,
+             "quaternion": QuaternionMonitor}
 
 
 def build_monitors(check_cfg):

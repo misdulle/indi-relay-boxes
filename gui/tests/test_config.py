@@ -21,8 +21,11 @@ def test_load_example_config():
     assert [s["step"] for s in config["sequences"]["starting"]][:2] == ["relay_on", "wait"]
     kinds = {c["name"]: c["kind"] for c in config["checks"]["items"]}
     assert kinds["pi5_ping"] == "ping"
-    assert kinds["imu_udp"] == "udp"
+    assert kinds["imu_udp"] == "quaternion"
     assert config["checks"]["items"][1]["recovery"][0]["step"] == "relay_cycle"
+    assert config["pi5_wake"]["enabled"] is True
+    assert config["pi5_wake"]["relay"] == 1
+    assert config["pi5_wake"]["ping_host"] == "192.168.1.29"
 
 
 def test_defaults_fill_missing_sections():
@@ -31,6 +34,12 @@ def test_defaults_fill_missing_sections():
     assert config["checks"]["interval_s"] == 15
     assert config["sequences"]["starting"] == []
     assert config["roof_timeout_s"] == 180
+    assert config["scope_view_rotation"] == 200.0
+
+
+def test_scope_view_rotation_normalized():
+    config = config_module.normalize({"scope_view_rotation": "175"})
+    assert config["scope_view_rotation"] == 175.0
 
 
 def test_relay_exclude_names_are_normalized():
@@ -53,3 +62,69 @@ def test_missing_check_parameters_rejected():
 def test_step_without_step_key_rejected():
     with pytest.raises(ValueError):
         config_module.normalize({"sequences": {"starting": [{"seconds": 2}]}})
+
+
+def test_imu_calibration_keys_normalized():
+    config = config_module.normalize({
+        "imu_park_quaternion": [0.108337, -0.022705, -0.081787, 0.990479]})
+    assert config["imu_park_quaternion"] == (0.108337, -0.022705, -0.081787, 0.990479)
+    assert config["imu_optical_axis"] == "+x"
+    assert config["devices"]["mount"] == "EQMod Mount"
+
+
+def test_bad_imu_calibration_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"imu_park_quaternion": [1.0, 2.0]})
+    with pytest.raises(ValueError):
+        config_module.normalize({"imu_optical_axis": "+w"})
+
+
+def test_quaternion_check_parameters_validated():
+    with pytest.raises(ValueError):
+        config_module.normalize({"checks": {"q": {"type": "quaternion"}}})
+    config = config_module.normalize({
+        "checks": {"q": {"type": "quaternion", "port": 2346, "timeout_s": 15}}})
+    item = config["checks"]["items"][0]
+    assert item["kind"] == "quaternion"
+    assert item["port"] == 2346
+    assert item["bind"] == "0.0.0.0"
+
+
+def test_pi5_wake_defaults_off():
+    config = config_module.normalize({})
+    assert config["pi5_wake"] == {
+        "enabled": False, "host": "192.168.1.23", "port": 80, "user": "admin",
+        "password": "", "relay": 1, "ping_host": None, "timeout_s": 3.0,
+        "wait_s": 90.0}
+
+
+def test_pi5_wake_normalized():
+    config = config_module.normalize({
+        "pi5_wake": {"enabled": "yes", "host": "192.168.1.40", "relay": "4",
+                     "ping_host": "192.168.1.30", "timeout_s": "2", "wait_s": 0}})
+    wake = config["pi5_wake"]
+    assert wake["enabled"] is True
+    assert wake["host"] == "192.168.1.40"
+    assert wake["relay"] == 4
+    assert wake["ping_host"] == "192.168.1.30"
+    assert wake["timeout_s"] == 2.0
+    assert wake["wait_s"] == 0.0
+
+
+def test_pi5_wake_relay_range_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"relay": 0}})
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"relay": 9}})
+
+
+def test_pi5_wake_port_range_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"port": 0}})
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"port": 70000}})
+
+
+def test_pi5_wake_bad_type_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": "on"})

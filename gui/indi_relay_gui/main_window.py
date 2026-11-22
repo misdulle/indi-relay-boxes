@@ -2,13 +2,17 @@
 
 import time
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor
+import math
+
+from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QBrush, QColor, QKeySequence, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+    QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QShortcut,
+    QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
+from .attitude import (alt_az, angle_between, format_dec, format_ra,
+                       optical_axis, quat_angle)
 from .controller import Controller, Mode
 from .indi import IndiClient
 from .model import IndiModel
@@ -90,22 +94,23 @@ class _Bridge:
 class RelayPanel(QGroupBox):
     port_toggled = pyqtSignal(str, str, bool)
 
-    def __init__(self, alias, parent=None):
+    def __init__(self, alias, parent=None, columns=1):
         super().__init__(alias, parent)
         self.alias = alias
         self._buttons = {}
+        self._columns = max(1, int(columns))
+        self.setAlignment(Qt.AlignHCenter)
         self._grid = QGridLayout(self)
         self._grid.setSpacing(4)
 
-    def refresh(self, model, device, interactive):
-        ports = model.ports(device)
+    def refresh(self, model, device, interactive, exclude_ports=None):
+        ports = model.ports(device, exclude_ports=exclude_ports)
         vector = model.get(device, "PORTS")
         alert = vector is not None and vector["state"] == "IPS_ALERT"
         if vector is None:
             self.setTitle("%s (offline)" % device)
         else:
-            self.setTitle("%s - %d relays%s" % (device, len(ports),
-                                                " - communication error" if alert else ""))
+            self.setTitle("%s %s" % (device, " - communication error" if alert else ""))
         wanted = {port["name"]: port for port in ports}
         for name in list(self._buttons):
             if name not in wanted:
@@ -121,7 +126,7 @@ class RelayPanel(QGroupBox):
                 button.clicked.connect(
                     lambda checked, member=port["name"]:
                     self.port_toggled.emit(device, member, checked))
-                self._grid.addWidget(button, index // 4, index % 4)
+                self._grid.addWidget(button, index // self._columns, index % self._columns)
                 self._buttons[port["name"]] = button
             button.setText(port["label"])
             button.setChecked(port["on"])
@@ -137,6 +142,7 @@ class HeartbeatsPanel(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Heartbeats", parent)
+        self.setAlignment(Qt.AlignHCenter)
         layout = QVBoxLayout(self)
         self.clock_label = QLabel("--:--:--")
         self.clock_label.setAlignment(Qt.AlignCenter)
@@ -179,13 +185,209 @@ class HeartbeatsPanel(QGroupBox):
             self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
 
 
+class ScopeCanvas(QWidget):
+    """Top view (azimuth, map convention) + side view (altitude) drawing.
+
+    The scope tube is drawn tangent to the pier circle; the tangency side is
+    the mount pier side (TELESCOPE_PIER_SIDE), pointing south and horizontal
+    when parked.  Front lens = filled arrow, camera = thick stub at the tail.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(190)
+        self.data = {"mount": {}, "quat": None, "quat_age": None,
+                     "measured": None, "predicted": None, "discrepancy": None,
+                     "reference": None, "rotation": 200.0}
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        width = float(self.width())
+        height = float(self.height())
+        self._draw_top(painter, QRectF(0.0, 0.0, width / 2.0, height), self.data)
+        self._draw_side(painter, QRectF(width / 2.0, 0.0, width / 2.0, height), self.data)
+
+    def _sky_point(self, center, radius, az_deg):
+        angle = math.radians(az_deg)
+        return QPointF(center.x() + radius * math.sin(angle),
+                       center.y() - radius * math.cos(angle))
+
+    def _elev_point(self, anchor, dist, alt_deg):
+        alt = max(-90.0, min(90.0, alt_deg))
+        angle = math.radians(alt)
+        return QPointF(anchor.x() + dist * math.cos(angle),
+                       anchor.y() - dist * math.sin(angle))
+
+    def _tangent_az(self, az_deg, pier):
+        """Azimuth of the tube tangency point on the pier circle."""
+        if pier == "west":
+            return (az_deg + 90.0) % 360.0
+        if pier == "east":
+            return (az_deg - 90.0) % 360.0
+        return None
+
+    def _top_tube(self, painter, center, radius, length, az_deg, pier, color,
+                  dashed, width, marked, rotation=0.0):
+        painter.save()
+        pen = QPen(QColor(color))
+        pen.setWidth(width)
+        pen.setStyle(Qt.DashLine if dashed else Qt.SolidLine)
+        painter.setPen(pen)
+        screen_az = (az_deg + rotation) % 360.0
+        offset = self._tangent_az(az_deg, pier)
+        offset = offset if offset is None else (offset + rotation) % 360.0
+        tangent = center if offset is None else self._sky_point(center, radius, offset)
+        tail = self._sky_point(tangent, -length, screen_az)
+        tip = self._sky_point(tangent, length, screen_az)
+        painter.drawLine(tail, tip)
+        if marked:
+            self._lens(painter, tip, screen_az, color)
+            self._camera(painter, tail, screen_az, color)
+        painter.restore()
+
+    def _lens(self, painter, tip, az_deg, color):
+        painter.save()
+        painter.setPen(QPen(QColor(color), 1))
+        painter.setBrush(QBrush(QColor(color)))
+        painter.drawPolygon(QPolygonF([
+            self._sky_point(tip, 13.0, az_deg),
+            self._sky_point(tip, 7.0, (az_deg + 145.0) % 360.0),
+            self._sky_point(tip, 7.0, (az_deg - 145.0) % 360.0)]))
+        painter.restore()
+
+    def _camera(self, painter, tail, az_deg, color):
+        painter.save()
+        pen = QPen(QColor(color))
+        pen.setWidth(9)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(tail, self._sky_point(tail, 7.0, az_deg))
+        painter.restore()
+
+    def _draw_top(self, painter, rect, data):
+        painter.save()
+        painter.setPen(QPen(QColor("#777777")))
+        painter.drawText(rect.adjusted(8, 6, -8, -6), Qt.AlignTop | Qt.AlignLeft, "top view (az N/E/S/W)")
+        painter.drawText(rect.adjusted(8, -6, -8, 6), Qt.AlignBottom | Qt.AlignLeft,
+                         "arrow = front lens, stub = camera")
+        center = QPointF(rect.center().x(), rect.center().y() + 8.0)
+        radius = min(rect.width(), rect.height()) * 0.20
+        rotation = float(data.get("rotation") or 0.0)
+        painter.setPen(QPen(QColor("#555555"), 1))
+        painter.drawEllipse(center, radius, radius)
+        painter.setPen(QPen(QColor("#777777")))
+        for az, label in ((0.0, "N"), (90.0, "E"), (180.0, "S"), (270.0, "W")):
+            painter.drawText(self._sky_point(center, radius + 12.0, (az + rotation) % 360.0), label)
+        painter.setBrush(QBrush(QColor("#444444")))
+        painter.drawEllipse(center, 3.5, 3.5)
+        pier = (data.get("mount") or {}).get("pier")
+        length = radius * 0.25 + 26.0
+        if data.get("measured") is not None:
+            self._top_tube(painter, center, radius, length, data["measured"][0],
+                           pier, "#2e8b57", dashed=False, width=4, marked=True,
+                           rotation=rotation)
+        elif data.get("reference") is not None:
+            self._top_tube(painter, center, radius, length, data["reference"][0],
+                           pier, "#888888", dashed=False, width=3, marked=True,
+                           rotation=rotation)
+        if data.get("predicted") is not None:
+            self._top_tube(painter, center, radius, length, data["predicted"][0],
+                           pier, "#3498db", dashed=True, width=2, marked=False,
+                           rotation=rotation)
+        painter.restore()
+
+    def _draw_side(self, painter, rect, data):
+        painter.save()
+        painter.setPen(QPen(QColor("#777777")))
+        painter.drawText(rect.adjusted(8, 6, -8, -6), Qt.AlignTop | Qt.AlignLeft, "side view (altitude)")
+        base_y = rect.bottom() - 18.0
+        anchor = QPointF(rect.left() + 18.0, base_y)
+        painter.setPen(QPen(QColor("#555555"), 2))
+        painter.drawLine(QPointF(rect.left() + 6.0, base_y),
+                         QPointF(rect.right() - 6.0, base_y))
+        length = min(rect.width() - 40.0, (rect.height() - 40.0))
+        if data.get("measured") is not None:
+            self._elevation_line(painter, anchor, length, data["measured"][1],
+                                 "#2e8b57", dashed=False, marked=True)
+        elif data.get("reference") is not None:
+            self._elevation_line(painter, anchor, length, data["reference"][1],
+                                 "#888888", dashed=False, marked=True)
+        if data.get("predicted") is not None:
+            self._elevation_line(painter, anchor, length, data["predicted"][1],
+                                 "#3498db", dashed=True, marked=False)
+        painter.restore()
+
+    def _elevation_line(self, painter, anchor, length, alt_deg, color, dashed, marked=False):
+        painter.save()
+        pen = QPen(QColor(color))
+        pen.setWidth(4)
+        pen.setStyle(Qt.DashLine if dashed else Qt.SolidLine)
+        painter.setPen(pen)
+        tail = self._elev_point(anchor, -length * 0.30, alt_deg)
+        tip = self._elev_point(anchor, length * 0.70, alt_deg)
+        painter.drawLine(tail, tip)
+        if marked:
+            screen_az = 90.0 - max(-90.0, min(90.0, alt_deg))
+            self._lens(painter, tip, screen_az, color)
+            self._camera(painter, tail, screen_az, color)
+        painter.restore()
+
+
+class ScopePanel(QGroupBox):
+    """IMU + mount visualization: azimuth / altitude pointers and readouts."""
+
+    def __init__(self, parent=None):
+        super().__init__("Scope / mount position", parent)
+        layout = QVBoxLayout(self)
+        self.readout = QLabel("")
+        self.readout.setStyleSheet("font-family: monospace; font-size: 10pt;")
+        self.readout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        layout.addWidget(self.readout)
+        self.canvas = ScopeCanvas()
+        layout.addWidget(self.canvas, 1)
+
+    def refresh(self, data):
+        self.canvas.data = dict(data)
+        self.canvas.update()
+        mount = data.get("mount") or {}
+        lines = ["mount  RA %s  DEC %s  pier %s%s" % (
+            format_ra(mount.get("ra")), format_dec(mount.get("dec")),
+            mount.get("pier") or "?",
+            "  PARKED" if mount.get("parked") else "")]
+        if data.get("reference") is not None:
+            pier = mount.get("pier")
+            lines.append("parked ref: az 180 alt 0 (south, horizontal%s)"
+                         % (", scope on %s side of pier" % pier if pier
+                            else ", pier side unknown"))
+        quat = data.get("quat")
+        if quat is not None:
+            lines.append("IMU    w %+.4f  x %+.4f  y %+.4f  z %+.4f  (%.0f s ago)"
+                         % (quat[0], quat[1], quat[2], quat[3],
+                            data.get("quat_age") or 0.0))
+        else:
+            lines.append("IMU    no quaternion (add a type: quaternion check)")
+        parts = []
+        if data.get("park_angle") is not None:
+            parts.append("IMU vs park pose %.1f" % data["park_angle"])
+        if data.get("measured") is not None:
+            parts.append("IMU az %.0f alt %.0f" % data["measured"])
+        if data.get("predicted") is not None:
+            parts.append("mount az %.0f alt %.0f" % data["predicted"])
+        if data.get("discrepancy") is not None:
+            parts.append("difference %.1f" % data["discrepancy"])
+        lines.append("point  " + ("; ".join(parts) if parts else "waiting"))
+        self.readout.setText("\n".join(lines))
+
+
 class RoofPanel(QGroupBox):
     roof_open = pyqtSignal()
     roof_close = pyqtSignal()
     roof_stop = pyqtSignal()
 
     def __init__(self, parent=None):
-        super().__init__("Roll-off roof", parent)
+        super().__init__("Roof", parent)
+        self.setAlignment(Qt.AlignHCenter)
         layout = QVBoxLayout(self)
         self.state_label = QLabel("offline")
         self.state_label.setAlignment(Qt.AlignCenter)
@@ -328,13 +530,20 @@ class ModePanel(QGroupBox):
 class ConfigPanel(QGroupBox):
     def __init__(self, config, parent=None):
         super().__init__("Configuration", parent)
+        self.setAlignment(Qt.AlignHCenter)
         layout = QFormLayout(self)
         for key, value in config["indiserver"].items():
-            layout.addRow(QLabel("%s:" % key), QLabel(str(value)))
+            label = QLabel(str(value))
+            label.setWordWrap(True)
+            layout.addRow(QLabel("%s:" % key), label)
         devices = ", ".join("%s=%s" % (k, v) for k, v in sorted(config["devices"].items()))
-        layout.addRow(QLabel("Devices:"), QLabel(devices))
+        devices_label = QLabel(devices)
+        devices_label.setWordWrap(True)
+        layout.addRow(QLabel("Devices:"), devices_label)
         hidden = ", ".join(config["relay_exclude_names"]) or "-"
-        layout.addRow(QLabel("Hidden relays:"), QLabel(hidden))
+        hidden_label = QLabel(hidden)
+        hidden_label.setWordWrap(True)
+        layout.addRow(QLabel("Hidden relays:"), hidden_label)
 
 
 class LogPanel(QPlainTextEdit):
@@ -348,6 +557,8 @@ class LogPanel(QPlainTextEdit):
 
 
 class MainWindow(QMainWindow):
+    reconnect_event = pyqtSignal()
+    log_event = pyqtSignal(str)
     vector_received = pyqtSignal(object)
     property_deleted = pyqtSignal(str, str)
     message_received = pyqtSignal(str, str)
@@ -365,6 +576,7 @@ class MainWindow(QMainWindow):
         self._last_server_rx = time.time()
         self._safety_rx = None
         self._safety_ok = False
+        self._park_anchor = None
         self.setWindowTitle("indi-relay-boxes control")
         self._build_menu()
         self._build_ui()
@@ -376,7 +588,15 @@ class MainWindow(QMainWindow):
         menu = self.menuBar().addMenu("&File")
         reload_action = menu.addAction("Reload &config")
         reload_action.triggered.connect(self._reload_config)
-        menu.addAction("Quit").triggered.connect(self.close)
+        quit_action = menu.addAction("Quit")
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.triggered.connect(self.close)
+
+    def toggle_maximized(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     def _build_ui(self):
         central = QWidget()
@@ -388,15 +608,17 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         self.relay_panels = []
-        for alias in self.config["devices"]:
-            if alias == "roof":
-                continue
+        relay_columns = QHBoxLayout()
+        relay_columns.setSpacing(6)
+        for alias in ("kmtronic8", "relay16"):
             panel = RelayPanel(alias)
             panel.port_toggled.connect(self._on_port_toggled)
             self.relay_panels.append(panel)
-            left_layout.addWidget(panel)
+            relay_columns.addWidget(panel)
+        left_layout.addLayout(relay_columns)
         left_layout.addWidget(ConfigPanel(self.config))
         left_layout.addStretch(1)
+        left.setMaximumWidth(400)
         splitter.addWidget(left)
 
         middle = QWidget()
@@ -404,9 +626,10 @@ class MainWindow(QMainWindow):
         middle_layout.setContentsMargins(0, 0, 0, 0)
         self.roof_panel = RoofPanel()
         self.mode_panel = ModePanel()
+        self.scope_panel = ScopePanel()
         middle_layout.addWidget(self.roof_panel)
         middle_layout.addWidget(self.mode_panel)
-        middle_layout.addStretch(1)
+        middle_layout.addWidget(self.scope_panel, 1)
         splitter.addWidget(middle)
 
         right = QWidget()
@@ -424,7 +647,9 @@ class MainWindow(QMainWindow):
         self._ticker.timeout.connect(self._tick)
         self._ticker.start(500)
 
-        splitter.setSizes([440, 320, 380])
+        QShortcut(QKeySequence("Ctrl+F"), self, self.toggle_maximized)
+
+        splitter.setSizes([320, 360, 420])
         self.setCentralWidget(central)
 
         self.connection_label = QLabel("disconnected")
@@ -435,6 +660,8 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.reconnect_button)
 
     def _wire(self):
+        self.log_event.connect(self._on_log)
+        self.reconnect_event.connect(self._on_reconnect_requested)
         self.vector_received.connect(self._on_vector)
         self.property_deleted.connect(self._on_property_deleted)
         self.message_received.connect(lambda dev, msg: self.log("[%s] %s" % (dev, msg)))
@@ -448,6 +675,9 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def log(self, message):
+        self.log_event.emit(str(message))
+
+    def _on_log(self, message):
         self.log_panel.append(message)
 
     def _connect(self):
@@ -501,12 +731,20 @@ class MainWindow(QMainWindow):
         self.controller.reset_connections()
         self._safety_rx = None
         self._safety_ok = False
+        self._park_anchor = None
         self.log("indiserver connection lost: %s" % reason)
         self._apply_connection_state(False, "disconnected")
         self._refresh_all()
 
     def _on_controller_event(self, event, payload):
+        if event == "reconnect_requested":
+            self.reconnect_event.emit()
+            return
         self.mode_event.emit(event, payload)
+
+    def _on_reconnect_requested(self):
+        self.log("pi5_wake: indiserver should be back - reconnecting")
+        self._connect()
 
     def _on_mode_event(self, event, payload):
         if event != "mode_changed":
@@ -561,14 +799,56 @@ class MainWindow(QMainWindow):
         for name, monitor in self.controller.monitors.items():
             entries[name] = monitor.status(now)
         self.heartbeats_panel.refresh(now, entries)
+        self.scope_panel.refresh(self._scope_data(now))
+
+    def _scope_data(self, now):
+        mount_device = self.config["devices"].get("mount")
+        data = {"mount": self.model.mount_state(mount_device) or {},
+                "quat": None, "quat_age": None, "measured": None,
+                "predicted": None, "discrepancy": None, "reference": None,
+                "park_angle": None, "rotation":
+                float(self.config.get("scope_view_rotation", 200.0))}
+        monitor = None
+        for candidate in self.controller.monitors.values():
+            if getattr(candidate, "kind", "") == "quaternion":
+                monitor = candidate
+                break
+        if monitor is not None and monitor.quaternion and monitor.quaternion_at:
+            age = now - monitor.quaternion_at
+            data["quat"] = monitor.quaternion
+            data["quat_age"] = age
+            # While the mount reports PARK the freshest quaternion IS the park
+            # reference: this re-anchors constantly, so sensor yaw drift cannot
+            # make the parked scope wander away from plain south.  After the
+            # scope moves, pointings are inferred from this last parked reading.
+            if data["mount"].get("parked") and age < 10:
+                self._park_anchor = data["quat"]
+            park_ref = self._park_anchor or self.config.get("imu_park_quaternion")
+            if park_ref and age < 10:
+                data["measured"] = optical_axis(
+                    data["quat"], park_ref, self.config.get("imu_optical_axis", "+x"))
+                data["park_angle"] = quat_angle(park_ref, data["quat"])
+        if data["mount"].get("parked"):
+            data["reference"] = (180.0, 0.0)   # parked: horizontal, pointing south
+        mount = data["mount"]
+        site = self.model.site_coords(mount_device)
+        if (mount.get("ra") is not None and mount.get("dec") is not None
+                and site and (site["lat"] or site["lon"])):
+            data["predicted"] = alt_az(mount["ra"], mount["dec"],
+                                       site["lat"], site["lon"])
+        if data["measured"] is not None and data["predicted"] is not None:
+            data["discrepancy"] = angle_between(data["measured"], data["predicted"])
+        return data
 
     def _refresh_all(self):
         interactive = self.controller.relay_actions_allowed()
+        roof_relays = self.model.roof_control_ports(self.config["devices"].get("roof"))
         seen = set()
         for panel in self.relay_panels:
             device = self.config["devices"].get(panel.alias, panel.alias)
             seen.add(device)
-            panel.refresh(self.model, device, interactive)
+            exclude = roof_relays if panel.alias == "relay16" else None
+            panel.refresh(self.model, device, interactive, exclude_ports=exclude)
         self.roof_panel.refresh(self.model, self.config["devices"].get("roof"),
                                 movable=self.controller.roof_movable(),
                                 stop_allowed=self.controller.roof_stop_allowed(),

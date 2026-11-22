@@ -185,3 +185,51 @@ def test_check_runner_reuses_shared_monitors():
         runner.stop()
     finally:
         shared["imu_udp"].stop()
+
+
+QUAT_DATAGRAM = b"w0.108337wa-0.022705ab-0.081787bc0.990479c"
+
+
+def test_quaternion_monitor_decodes_and_tracks_staleness():
+    spec = {"name": "imu_quat", "bind": "127.0.0.1", "port": 45682,
+            "timeout_s": 10}
+    check = checks_mod.QuaternionMonitor(spec)
+    check.start()
+    try:
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        deadline = time.time() + 3
+        while check.quaternion is None and time.time() < deadline:
+            sender.sendto(QUAT_DATAGRAM, ("127.0.0.1", 45682))
+            time.sleep(0.05)
+        sender.close()
+        assert check.quaternion == (0.108337, -0.022705, -0.081787, 0.990479)
+        now = time.time()
+        ok, message = check.run_check(now)
+        assert ok is True and "quaternion" in message
+        check.quaternion_at = time.time() - 120
+        ok, message = check.run_check(time.time())
+        assert ok is False
+    finally:
+        check.stop()
+
+
+def test_quaternion_monitor_keeps_last_quaternion_on_garbage():
+    spec = {"name": "imu_quat", "bind": "127.0.0.1", "port": 45683,
+            "timeout_s": 60}
+    check = checks_mod.QuaternionMonitor(spec)
+    check.start()
+    try:
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        deadline = time.time() + 3
+        while check.quaternion is None and time.time() < deadline:
+            sender.sendto(QUAT_DATAGRAM, ("127.0.0.1", 45683))
+            time.sleep(0.05)
+        sender.sendto(b"not a quaternion", ("127.0.0.1", 45683))
+        time.sleep(0.2)
+        sender.close()
+        assert check.bad_datagrams == 1
+        assert check.quaternion == (0.108337, -0.022705, -0.081787, 0.990479)
+        ok, _ = check.run_check(time.time())
+        assert ok is True
+    finally:
+        check.stop()

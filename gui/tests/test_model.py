@@ -179,3 +179,111 @@ def test_set_update_light_values_only():
     model.apply_vector(update)
     lights = model.roof_safety("eulRoof")
     assert lights == {"MOUNT_PARKED": "IPS_OK", "IMU_SAFE": "IPS_OK"}
+
+
+def mount_coord_vector():
+    return vector_from_element(ET.fromstring(
+        '<setNumberVector device="EQMod Mount" name="EQUATORIAL_EOD_COORD" state="IPS_OK">'
+        '<oneNumber name="RA">18.5</oneNumber>'
+        '<oneNumber name="DEC">38.7939</oneNumber>'
+        "</setNumberVector>"))
+
+
+def pier_vector(side="west"):
+    return vector_from_element(ET.fromstring(
+        '<defSwitchVector device="EQMod Mount" name="TELESCOPE_PIER_SIDE" state="IPS_OK" rule="ISR_1OFMANY">'
+        '<defSwitch name="PIER_EAST">%s</defSwitch>'
+        '<defSwitch name="PIER_WEST">%s</defSwitch>'
+        "</defSwitchVector>" % ("On" if side == "east" else "Off",
+                                "On" if side == "west" else "Off")))
+
+
+def park_vector(parked=True):
+    return vector_from_element(ET.fromstring(
+        '<defSwitchVector device="EQMod Mount" name="TELESCOPE_PARK" state="IPS_OK">'
+        '<defSwitch name="PARK">%s</defSwitch>'
+        '<defSwitch name="UNPARK">Off</defSwitch>'
+        "</defSwitchVector>" % ("On" if parked else "Off")))
+
+
+def site_vector():
+    return vector_from_element(ET.fromstring(
+        '<defNumberVector device="EQMod Mount" name="GEOGRAPHIC_COORD" state="IPS_OK">'
+        '<oneNumber name="LATITUDE">48.2</oneNumber>'
+        '<oneNumber name="LONGITUDE">7.6</oneNumber>'
+        "</defNumberVector>"))
+
+
+def test_mount_state_reads_pointing_pier_and_park():
+    model = IndiModel()
+    assert model.mount_state("EQMod Mount") == {"ra": None, "dec": None, "pier": None,
+                                                "parked": None, "online": False}
+    model.apply_vector(mount_coord_vector())
+    model.apply_vector(pier_vector("west"))
+    model.apply_vector(park_vector(True))
+    state = model.mount_state("EQMod Mount")
+    assert state["ra"] == 18.5
+    assert state["dec"] == 38.7939
+    assert state["pier"] == "west"
+    assert state["parked"] is True
+    assert state["online"] is True
+
+
+def test_mount_state_park_switch_reports_unparked():
+    model = IndiModel()
+    model.apply_vector(park_vector(False))
+    assert model.mount_state("EQMod Mount")["parked"] is False
+
+
+def test_site_coords():
+    model = IndiModel()
+    assert model.site_coords("EQMod Mount") is None
+    model.apply_vector(site_vector())
+    assert model.site_coords("EQMod Mount") == {"lat": 48.2, "lon": 7.6}
+
+
+def relay16_vector():
+    members = "".join(
+        '<defSwitch name="PORT%02d" label="R%02d">Off</defSwitch>' % (n, n)
+        for n in range(1, 6))
+    return vector_from_element(ET.fromstring(
+        '<defSwitchVector device="Relay16" name="PORTS" state="IPS_OK">'
+        + members + "</defSwitchVector>"))
+
+
+def roof_relay_params_vector(stop="1", open_="2", close="3"):
+    return vector_from_element(ET.fromstring(
+        '<defNumberVector device="eulRoof" name="ROOF_RELAY_PARAMS" state="IPS_OK">'
+        '<oneNumber name="TCP_PORT">80</oneNumber>'
+        '<oneNumber name="ADDR">30</oneNumber>'
+        '<oneNumber name="TIMEOUT_MS">2000</oneNumber>'
+        '<oneNumber name="RELAY_STOP">%s</oneNumber>'
+        '<oneNumber name="RELAY_OPEN">%s</oneNumber>'
+        '<oneNumber name="RELAY_CLOSE">%s</oneNumber>'
+        '<oneNumber name="PULSE_MS">500</oneNumber>'
+        "</defNumberVector>" % (stop, open_, close)))
+
+
+def test_roof_control_ports_from_driver_params():
+    model = make_model()
+    assert model.roof_control_ports("eulRoof") == set()
+    model.apply_vector(roof_relay_params_vector())
+    assert model.roof_control_ports("eulRoof") == {1, 2, 3}
+    assert model.roof_control_ports("Relay16") == set()
+
+
+def test_ports_exclude_roof_control_relays():
+    model = make_model()
+    model.apply_vector(relay16_vector())
+    model.apply_vector(roof_relay_params_vector())
+    assert [p["name"] for p in model.ports("Relay16")] == ["PORT01", "PORT02",
+                                                           "PORT03", "PORT04", "PORT05"]
+    filtered = model.ports("Relay16", exclude_ports=model.roof_control_ports("eulRoof"))
+    assert [p["name"] for p in filtered] == ["PORT04", "PORT05"]
+    assert model.ports("Relay16", exclude_ports=set()) == model.ports("Relay16")
+
+
+def test_ports_exclude_ignores_non_port_members():
+    model = make_model()
+    model.apply_vector(relay16_vector())
+    assert model.ports("Relay16", exclude_ports={99}) == model.ports("Relay16")
