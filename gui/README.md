@@ -263,14 +263,19 @@ without a quaternion check, only the readouts.
 
 In the right panel (between the checks panel and the log) the mount itself
 is drawn as a larger stick figure (orthographic, no GPU/3D library),
-oriented by angles:
+oriented by angles, each part in its own color (pier sienna, polar axis
+purple, DEC axis blue, tube green):
 
 - the **pillar** stands at the origin;
 - on top of the pillar, the **polar (hour angle) axis** is drawn as a
   500 mm bar pointing at the celestial pole - its angle to the vertical
-  is 90° minus the site latitude the mount reports (`GEOGRAPHIC_COORD`);
-- at the **centre of that bar**, perpendicular to it, the **DEC axis**;
-  it turns with the pointing (rotation about the polar axis);
+  is 90° minus the site latitude the mount reports (`GEOGRAPHIC_COORD`),
+  e.g. 47.5° at latitude 42.5°N;
+- the **DEC axis** is exactly 90° from the polar axis (verified by
+  re-orthogonalization even in degenerate cases) and its rotation about
+  the polar axis follows the pointing; `TELESCOPE_PIER_SIDE` flips it so
+  the saddle sits on the real scope side of the pier (west of the pier
+  when parked, if PIER_WEST);
 - the **tube** is attached to the DEC axis offset by `SADDLE_OFFSET` =
   0.40 m along it (so it sits beside, not on, the polar axis) and stays
   perpendicular to the DEC axis, rotating about it; its direction uses (in

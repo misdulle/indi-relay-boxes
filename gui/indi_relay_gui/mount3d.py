@@ -7,6 +7,11 @@ and the figure builder.  World frame: +x = south, +y = east, +z = up
 
 import math
 
+PIER_COLOR = "#a0522d"   # sienna: clearly distinct from the axes
+RA_COLOR = "#8e44ad"     # polar (hour angle) axis
+DEC_COLOR = "#1565c0"    # declination axis
+TUBE_COLOR = "#2e8b57"
+
 PIER_HEIGHT = 1.0     # m, pier top above ground
 RA_LENGTH = 0.50      # m, polar (hour angle) bar, pointing at the NCP
 DEC_BACK = 0.15       # m, DEC bar extends this far on the counterweight side
@@ -64,11 +69,22 @@ def celestial_pole(lat_deg):
 
 
 def dec_axis(ra_axis, tube_dir):
-    """DEC axis: perpendicular to both the RA axis and the tube."""
+    """DEC axis: exactly 90 deg from the polar axis (and from the tube)."""
     axis = vec_cross(ra_axis, tube_dir)
     if vec_norm(axis) < 1e-6:
-        return (0.0, 1.0, 0.0)
-    return vec_unit(axis)
+        axis = vec_cross(ra_axis, (0.0, 0.0, 1.0) if abs(ra_axis[2]) < 0.9
+                         else (0.0, 1.0, 0.0))
+    dec = vec_unit(axis)
+    return vec_unit(vec_sub(dec, vec_scale(ra_axis, vec_dot(dec, ra_axis))))
+
+
+def _pier_side_adjust(dec, pier):
+    """Flip the DEC axis so the saddle sits on the actual scope side."""
+    if pier == "west" and dec[1] > 1e-9:
+        return vec_scale(dec, -1.0)
+    if pier == "east" and dec[1] < -1e-9:
+        return vec_scale(dec, -1.0)
+    return dec
 
 
 def project(point, view_az_deg, view_alt_deg, scale, center):
@@ -118,14 +134,14 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     origin = (0.0, 0.0, 0.0)
     head = (0.0, 0.0, PIER_HEIGHT)
     figure["polygons"].append(_ground_disc())
-    segments.append(_seg(origin, head, "#555555", 15))
+    segments.append(_seg(origin, head, PIER_COLOR, 15))
     labels.append((vec_scale(head, 1.02), "pier"))
 
     ra_dir = celestial_pole(lat) if lat is not None else None
     if ra_dir is not None:
         back = vec_sub(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
         tip = vec_add(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
-        segments.append(_seg(back, tip, "#8e44ad", 14))
+        segments.append(_seg(back, tip, RA_COLOR, 14))
         labels.append((vec_add(tip, vec_scale(ra_dir, 0.10)), "RA"))
 
     tube_dir = _tube_direction(mount, lat)
@@ -133,10 +149,10 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
         return figure
 
     ra_axis = ra_dir or (0.0, -1.0, 0.0)
-    dec = dec_axis(ra_axis, tube_dir)
+    dec = _pier_side_adjust(dec_axis(ra_axis, tube_dir), mount.get("pier"))
     dec_start = vec_sub(head, vec_scale(dec, DEC_BACK))
     saddle = vec_add(head, vec_scale(dec, SADDLE_OFFSET))
-    segments.append(_seg(dec_start, saddle, "#8e44ad", 11))
+    segments.append(_seg(dec_start, saddle, DEC_COLOR, 11))
     labels.append((vec_add(saddle, vec_scale(dec, 0.08)), "DEC"))
     tail = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF))
     tip = vec_add(saddle, vec_scale(tube_dir, TUBE_HALF))
@@ -144,8 +160,8 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     for index, width in enumerate(TUBE_WIDTHS):
         start = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF + index * step))
         end = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF + (index + 1) * step))
-        segments.append(_seg(start, end, "#2e8b57", width))
-    markers.append({"kind": "lens", "point": tip, "color": "#2e8b57"})
+        segments.append(_seg(start, end, TUBE_COLOR, width))
+    markers.append({"kind": "lens", "point": tip, "color": TUBE_COLOR})
     markers.append({"kind": "camera", "point": tail, "color": "#4a4a4a"})
     labels.append((vec_add(tip, vec_scale(tube_dir, 0.12)), "lens"))
     labels.append((vec_add(tail, vec_scale(tube_dir, -0.12)), "camera"))

@@ -43,7 +43,29 @@ def test_dec_axis_perpendicular_and_unit():
 def test_dec_axis_degenerate_fallback():
     same = mount3d.dir_from_azalt(45.0, 10.0)
     dec = mount3d.dec_axis(same, same)
-    assert dec == (0.0, 1.0, 0.0)
+    assert abs(mount3d.vec_norm(dec) - 1.0) < EPS
+    assert abs(mount3d.vec_dot(dec, same)) < EPS   # exactly 90 deg from RA
+
+
+def test_dec_axis_is_90_deg_from_polar_axis():
+    pole = mount3d.celestial_pole(42.5)
+    for az, alt in ((180.0, 0.0), (90.0, 45.0), (315.0, 33.0)):
+        tube = mount3d.dir_from_azalt(az, alt)
+        dec = mount3d.dec_axis(pole, tube)
+        assert abs(mount3d.vec_dot(dec, pole)) < EPS
+        assert abs(mount3d.vec_dot(dec, tube)) < EPS
+        assert abs(mount3d.vec_norm(dec) - 1.0) < EPS
+
+
+def test_pier_side_flips_dec_axis_saddle_side():
+    figure = mount3d.build_figure(
+        {"az": 180.0, "alt": 0.0, "pier": "west"}, {"lat": 42.5, "lon": 0.0})
+    dec_bar = next(s for s in figure["segments"] if s["color"] == mount3d.DEC_COLOR)
+    assert dec_bar["b"][1] < 0.0     # saddle on the west side
+    figure = mount3d.build_figure(
+        {"az": 180.0, "alt": 0.0, "pier": "east"}, {"lat": 42.5, "lon": 0.0})
+    dec_bar = next(s for s in figure["segments"] if s["color"] == mount3d.DEC_COLOR)
+    assert dec_bar["b"][1] > 0.0     # saddle on the east side
 
 
 def test_project_origin_at_center():
