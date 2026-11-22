@@ -65,15 +65,18 @@ class IndiModel:
     def hidden_relay_names(self):
         return {n.lower() for n in HIDDEN_RELAY_NAMES}
 
-    def ports(self, device):
+    def ports(self, device, exclude_ports=None):
         vector = self.get(device, "PORTS")
         if vector is None:
             return []
         hidden = self.hidden_relay_names()
+        excluded = exclude_ports or set()
         ports = []
         for member in vector["members"].values():
             label = member["label"] or member["name"]
             if label.strip().lower() in hidden:
+                continue
+            if self._port_number(member["name"]) in excluded:
                 continue
             ports.append({
                 "name": member["name"],
@@ -83,6 +86,29 @@ class IndiModel:
             })
         ports.sort(key=lambda p: p["name"])
         return ports
+
+    @staticmethod
+    def _port_number(name):
+        try:
+            return int(str(name).rsplit("PORT", 1)[-1])
+        except ValueError:
+            return None
+
+    def roof_control_ports(self, device):
+        """Relay numbers (1..16) the roof driver pulses itself: STOP / OPEN /
+        CLOSE from ROOF_RELAY_PARAMS.  Empty set when the roof driver does not
+        report them (yet)."""
+        vector = self.get(device, "ROOF_RELAY_PARAMS")
+        if vector is None:
+            return set()
+        numbers = set()
+        for member in ("RELAY_STOP", "RELAY_OPEN", "RELAY_CLOSE"):
+            value = vector["members"].get(member, {}).get("value")
+            try:
+                numbers.add(int(float(value)))
+            except (TypeError, ValueError):
+                continue
+        return numbers
 
     def port_member(self, device, token):
         vector = self.get(device, "PORTS")

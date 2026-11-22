@@ -101,8 +101,8 @@ class RelayPanel(QGroupBox):
         self._grid = QGridLayout(self)
         self._grid.setSpacing(4)
 
-    def refresh(self, model, device, interactive):
-        ports = model.ports(device)
+    def refresh(self, model, device, interactive, exclude_ports=None):
+        ports = model.ports(device, exclude_ports=exclude_ports)
         vector = model.get(device, "PORTS")
         alert = vector is not None and vector["state"] == "IPS_ALERT"
         if vector is None:
@@ -807,11 +807,13 @@ class MainWindow(QMainWindow):
 
     def _refresh_all(self):
         interactive = self.controller.relay_actions_allowed()
+        roof_relays = self.model.roof_control_ports(self.config["devices"].get("roof"))
         seen = set()
         for panel in self.relay_panels:
             device = self.config["devices"].get(panel.alias, panel.alias)
             seen.add(device)
-            panel.refresh(self.model, device, interactive)
+            exclude = roof_relays if panel.alias == "relay16" else None
+            panel.refresh(self.model, device, interactive, exclude_ports=exclude)
         self.roof_panel.refresh(self.model, self.config["devices"].get("roof"),
                                 movable=self.controller.roof_movable(),
                                 stop_allowed=self.controller.roof_stop_allowed(),

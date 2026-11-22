@@ -88,6 +88,12 @@ OPEN / CLOSE / STOP are push buttons, not toggles: pressing one sends a single
 pulse-off timing itself. The GUI sends one command per click and displays the
 resulting shutter state reported by the driver.
 
+Because the roof driver pulses its STOP / OPEN / CLOSE relays directly, the
+corresponding Relay16 ports (from `eulRoof`'s `ROOF_RELAY_PARAMS`:
+`RELAY_STOP`, `RELAY_OPEN`, `RELAY_CLOSE`) are **not** shown as regular relay
+switches - the dedicated OPEN / CLOSE / STOP buttons are the only way to
+command them.
+
 OPEN and CLOSE are only clickable when the mode conditions are met **and**
 the roof can actually move: the scope must be **safe** (the `EulFocuser`
 driver reports `SCOPE_SAFETY / SAFE` = Ok, fallback `IMU_SAFE` of the roof
