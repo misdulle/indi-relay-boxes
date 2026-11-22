@@ -73,3 +73,17 @@ def test_formatting():
     assert attitude.format_dec(-11.5) == "-11°30'00\""
     assert attitude.format_ra(None) == "?"
     assert attitude.format_dec(None) == "?"
+
+
+def test_quat_angle_same_pose():
+    park = (0.108337, -0.022705, -0.081787, 0.990479)
+    assert attitude.quat_angle(park, park) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_quat_angle_rotation():
+    q90 = attitude.quat_from_axis_angle((0.0, 1.0, 0.0), 90.0)
+    assert attitude.quat_angle((1.0, 0.0, 0.0, 0.0), q90) == pytest.approx(90.0, abs=0.01)
+
+
+def test_quat_angle_ignores_double_cover():
+    assert attitude.quat_angle((1.0, 0.0, 0.0, 0.0), (-1.0, 0.0, 0.0, 0.0)) == pytest.approx(0.0, abs=1e-6)

@@ -5,13 +5,14 @@ import time
 import math
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QPainter, QPen
+from PyQt5.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from .attitude import alt_az, angle_between, format_dec, format_ra, optical_axis
+from .attitude import (alt_az, angle_between, format_dec, format_ra,
+                       optical_axis, quat_angle)
 from .controller import Controller, Mode
 from .indi import IndiClient
 from .model import IndiModel
@@ -183,13 +184,19 @@ class HeartbeatsPanel(QGroupBox):
 
 
 class ScopeCanvas(QWidget):
-    """Top view (azimuth, map convention) + side view (altitude) drawing."""
+    """Top view (azimuth, map convention) + side view (altitude) drawing.
+
+    The scope tube is drawn tangent to the pier circle; the tangency side is
+    the mount pier side (TELESCOPE_PIER_SIDE), pointing south and horizontal
+    when parked.  Front lens = filled arrow, camera = thick stub at the tail.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(190)
         self.data = {"mount": {}, "quat": None, "quat_age": None,
-                     "measured": None, "predicted": None, "discrepancy": None}
+                     "measured": None, "predicted": None, "discrepancy": None,
+                     "reference": None}
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -204,35 +211,82 @@ class ScopeCanvas(QWidget):
         return QPointF(center.x() + radius * math.sin(angle),
                        center.y() - radius * math.cos(angle))
 
-    def _tube_line(self, painter, center, length, az_deg, color, dashed, width=4):
+    def _elev_point(self, anchor, dist, alt_deg):
+        alt = max(-90.0, min(90.0, alt_deg))
+        angle = math.radians(alt)
+        return QPointF(anchor.x() + dist * math.cos(angle),
+                       anchor.y() - dist * math.sin(angle))
+
+    def _tangent_az(self, az_deg, pier):
+        """Azimuth of the tube tangency point on the pier circle."""
+        if pier == "west":
+            return (az_deg + 90.0) % 360.0
+        if pier == "east":
+            return (az_deg - 90.0) % 360.0
+        return None
+
+    def _top_tube(self, painter, center, radius, length, az_deg, pier, color,
+                  dashed, width, marked):
         painter.save()
         pen = QPen(QColor(color))
         pen.setWidth(width)
         pen.setStyle(Qt.DashLine if dashed else Qt.SolidLine)
         painter.setPen(pen)
-        painter.drawLine(self._sky_point(center, -length, az_deg),
-                         self._sky_point(center, length, az_deg))
+        offset = self._tangent_az(az_deg, pier)
+        tangent = center if offset is None else self._sky_point(center, radius, offset)
+        tail = self._sky_point(tangent, -length, az_deg)
+        tip = self._sky_point(tangent, length, az_deg)
+        painter.drawLine(tail, tip)
+        if marked:
+            self._lens(painter, tip, az_deg, color)
+            self._camera(painter, tail, az_deg, color)
+        painter.restore()
+
+    def _lens(self, painter, tip, az_deg, color):
+        painter.save()
+        painter.setPen(QPen(QColor(color), 1))
+        painter.setBrush(QBrush(QColor(color)))
+        painter.drawPolygon(QPolygonF([
+            self._sky_point(tip, 13.0, az_deg),
+            self._sky_point(tip, 7.0, (az_deg + 145.0) % 360.0),
+            self._sky_point(tip, 7.0, (az_deg - 145.0) % 360.0)]))
+        painter.restore()
+
+    def _camera(self, painter, tail, az_deg, color):
+        painter.save()
+        pen = QPen(QColor(color))
+        pen.setWidth(9)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(tail, self._sky_point(tail, 7.0, az_deg))
         painter.restore()
 
     def _draw_top(self, painter, rect, data):
         painter.save()
         painter.setPen(QPen(QColor("#777777")))
         painter.drawText(rect.adjusted(8, 6, -8, -6), Qt.AlignTop | Qt.AlignLeft, "top view (az N/E/S/W)")
+        painter.drawText(rect.adjusted(8, -6, -8, 6), Qt.AlignBottom | Qt.AlignLeft,
+                         "arrow = front lens, stub = camera")
         center = QPointF(rect.center().x(), rect.center().y() + 8.0)
-        radius = min(rect.width(), rect.height()) * 0.36
+        radius = min(rect.width(), rect.height()) * 0.20
         painter.setPen(QPen(QColor("#555555"), 1))
         painter.drawEllipse(center, radius, radius)
         painter.setPen(QPen(QColor("#777777")))
         for az, label in ((0.0, "N"), (90.0, "E"), (180.0, "S"), (270.0, "W")):
             painter.drawText(self._sky_point(center, radius + 12.0, az), label)
         painter.setBrush(QBrush(QColor("#444444")))
-        painter.drawEllipse(center, 5.0, 5.0)
-        if data.get("predicted") is not None:
-            self._tube_line(painter, center, radius * 0.75, data["predicted"][0],
-                            "#3498db", dashed=True, width=3)
+        painter.drawEllipse(center, 3.5, 3.5)
+        pier = (data.get("mount") or {}).get("pier")
+        length = radius * 0.25 + 26.0
         if data.get("measured") is not None:
-            self._tube_line(painter, center, radius * 0.25, data["measured"][0],
-                            "#2e8b57", dashed=False, width=4)
+            self._top_tube(painter, center, radius, length, data["measured"][0],
+                           pier, "#2e8b57", dashed=False, width=4, marked=True)
+        elif data.get("reference") is not None:
+            self._top_tube(painter, center, radius, length, data["reference"][0],
+                           pier, "#888888", dashed=False, width=3, marked=True)
+        if data.get("predicted") is not None:
+            self._top_tube(painter, center, radius, length, data["predicted"][0],
+                           pier, "#3498db", dashed=True, width=2, marked=False)
         painter.restore()
 
     def _draw_side(self, painter, rect, data):
@@ -245,24 +299,30 @@ class ScopeCanvas(QWidget):
         painter.drawLine(QPointF(rect.left() + 6.0, base_y),
                          QPointF(rect.right() - 6.0, base_y))
         length = min(rect.width() - 40.0, (rect.height() - 40.0))
-        if data.get("predicted") is not None:
-            self._elevation_line(painter, anchor, length, data["predicted"][1],
-                                 "#3498db", dashed=True)
         if data.get("measured") is not None:
             self._elevation_line(painter, anchor, length, data["measured"][1],
-                                 "#2e8b57", dashed=False)
+                                 "#2e8b57", dashed=False, marked=True)
+        elif data.get("reference") is not None:
+            self._elevation_line(painter, anchor, length, data["reference"][1],
+                                 "#888888", dashed=False, marked=True)
+        if data.get("predicted") is not None:
+            self._elevation_line(painter, anchor, length, data["predicted"][1],
+                                 "#3498db", dashed=True, marked=False)
         painter.restore()
 
-    def _elevation_line(self, painter, anchor, length, alt_deg, color, dashed):
+    def _elevation_line(self, painter, anchor, length, alt_deg, color, dashed, marked=False):
         painter.save()
         pen = QPen(QColor(color))
         pen.setWidth(4)
         pen.setStyle(Qt.DashLine if dashed else Qt.SolidLine)
         painter.setPen(pen)
-        angle = math.radians(max(-90.0, min(90.0, alt_deg)))
-        painter.drawLine(anchor,
-                         QPointF(anchor.x() + length * math.cos(angle),
-                                 anchor.y() - length * math.sin(angle)))
+        tail = self._elev_point(anchor, -length * 0.30, alt_deg)
+        tip = self._elev_point(anchor, length * 0.70, alt_deg)
+        painter.drawLine(tail, tip)
+        if marked:
+            screen_az = 90.0 - max(-90.0, min(90.0, alt_deg))
+            self._lens(painter, tip, screen_az, color)
+            self._camera(painter, tail, screen_az, color)
         painter.restore()
 
 
@@ -287,6 +347,11 @@ class ScopePanel(QGroupBox):
             format_ra(mount.get("ra")), format_dec(mount.get("dec")),
             mount.get("pier") or "?",
             "  PARKED" if mount.get("parked") else "")]
+        if data.get("reference") is not None:
+            pier = mount.get("pier")
+            lines.append("parked ref: az 180 alt 0 (south, horizontal%s)"
+                         % (", scope on %s side of pier" % pier if pier
+                            else ", pier side unknown"))
         quat = data.get("quat")
         if quat is not None:
             lines.append("IMU    w %+.4f  x %+.4f  y %+.4f  z %+.4f  (%.0f s ago)"
@@ -295,6 +360,8 @@ class ScopePanel(QGroupBox):
         else:
             lines.append("IMU    no quaternion (add a type: quaternion check)")
         parts = []
+        if data.get("park_angle") is not None:
+            parts.append("IMU vs park pose %.1f" % data["park_angle"])
         if data.get("measured") is not None:
             parts.append("IMU az %.0f alt %.0f" % data["measured"])
         if data.get("predicted") is not None:
@@ -708,7 +775,8 @@ class MainWindow(QMainWindow):
         mount_device = self.config["devices"].get("mount")
         data = {"mount": self.model.mount_state(mount_device) or {},
                 "quat": None, "quat_age": None, "measured": None,
-                "predicted": None, "discrepancy": None}
+                "predicted": None, "discrepancy": None, "reference": None,
+                "park_angle": None}
         monitor = None
         for candidate in self.controller.monitors.values():
             if getattr(candidate, "kind", "") == "quaternion":
@@ -722,6 +790,11 @@ class MainWindow(QMainWindow):
             if park_ref and age < 10:
                 data["measured"] = optical_axis(
                     data["quat"], park_ref, self.config.get("imu_optical_axis", "+x"))
+        if data["mount"].get("parked"):
+            data["reference"] = (180.0, 0.0)   # parked: horizontal, pointing south
+            if data["quat"] is not None and self.config.get("imu_park_quaternion"):
+                data["park_angle"] = quat_angle(
+                    self.config["imu_park_quaternion"], data["quat"])
         mount = data["mount"]
         site = self.model.site_coords(mount_device)
         if (mount.get("ra") is not None and mount.get("dec") is not None

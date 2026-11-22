@@ -203,9 +203,20 @@ side view (altitude).
 - **Predicted (blue, dashed)** - from the mount: RA/Dec of the configured
   mount device plus the site coordinates the mount driver reports
   (`GEOGRAPHIC_COORD`), converted to topocentric azimuth/altitude.
+- **Tube drawing** - the tube is tangent to the (small) pier circle: the
+  tangency side comes from `TELESCOPE_PIER_SIDE` (PIER_WEST / PIER_EAST),
+  the pointing azimuth from the IMU (or the parked reference). The filled
+  **arrow** marks the front lens (pointing direction), the thick stub at
+  the other end marks the camera.
+- **Parked reference (grey)** - when `TELESCOPE_PARK.PARK` is on and no live
+  IMU pointing is available, the tube is drawn in its park pose:
+  horizontal, pointing south.
 - The readout line shows RA/Dec, pier side, park state, the raw
-  quaternion with its age, both pointings and the difference angle
-  between them.
+  quaternion with its age, both pointings, the difference angle
+  between them and the IMU rotation against `imu_park_quaternion`.
+  That park quaternion (captured with the mount parked - scope level,
+  pointing south) is the reference used to infer the scope position from
+  later quaternion readings.
 
 If site coordinates are missing or zero, only the IMU pointer is drawn;
 without a quaternion check, only the readouts.

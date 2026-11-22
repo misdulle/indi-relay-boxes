@@ -99,6 +99,14 @@ def optical_axis(quaternion, park_quaternion, axis="+x"):
     return az, alt
 
 
+def quat_angle(first, second):
+    """Rotation angle in degrees between two quaternions (0 = same pose)."""
+    first = quat_normalize(first)
+    second = quat_normalize(second)
+    dot = abs(sum(a * b for a, b in zip(first, second)))
+    return math.degrees(2.0 * math.acos(max(-1.0, min(1.0, dot))))
+
+
 def angle_between(first, second):
     """Angle between two (azimuth, altitude) sky directions, degrees."""
     az1, alt1 = map(math.radians, first)
