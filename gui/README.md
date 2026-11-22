@@ -259,15 +259,18 @@ without a quaternion check, only the readouts.
 Below the two projections the mount itself is drawn as a small stick
 figure (orthographic, no GPU/3D library), oriented by angles:
 
-- the pier stands at the origin;
-- the **RA axis** points to the celestial pole, computed from the site
-  latitude the mount reports (`GEOGRAPHIC_COORD`);
-- the **tube** direction uses (in order of preference)
-  `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates, then the
-  parked pose (horizontal, pointing south) when `TELESCOPE_PARK.PARK` is
-  on;
-- the **DEC housing** connects RA axis and tube; the tube is labelled
-  `lens` (pointing) and `camera` (back end).
+- the **pillar** stands at the origin;
+- on top of the pillar, the **polar (hour angle) axis** is drawn as a
+  500 mm bar pointing at the celestial pole - its angle to the vertical
+  is 90° minus the site latitude the mount reports (`GEOGRAPHIC_COORD`);
+- at the **centre of that bar**, perpendicular to it, the **DEC axis**;
+  it turns with the pointing (rotation about the polar axis);
+- the **tube** is attached directly to the DEC axis (perpendicular to
+  it), so it rotates about the DEC axis; its direction uses (in order of
+  preference) `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates,
+  then the parked pose (horizontal, pointing south) when
+  `TELESCOPE_PARK.PARK` is on; labelled `lens` (pointing) and `camera`
+  (back end).
 
 `mount3d_view.az` / `mount3d_view.alt` set the camera position (from
 where you look at the mount); 200/25 gives a south-eastern, slightly

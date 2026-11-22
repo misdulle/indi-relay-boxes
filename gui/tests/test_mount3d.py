@@ -81,6 +81,47 @@ def test_tube_direction_unknown():
     assert mount3d._tube_direction({}, None) is None
 
 
+def test_gem_structure_pillar_ra_bar_dec_bar_tube():
+    figure = mount3d.build_figure(
+        {"az": 90.0, "alt": 0.0},                           # pointing east
+        {"lat": 42.5, "lon": 0.0})
+    by_width = {}
+    for seg in figure["segments"]:
+        by_width.setdefault(seg["width"], []).append(seg)
+    pier = by_width[13][0]
+    assert pier["a"] == (0.0, 0.0, 0.0)
+    assert pier["b"] == (0.0, 0.0, 1.0)
+    ra_bar = by_width[11][0]
+    pole = mount3d.celestial_pole(42.5)
+    tilt = math.degrees(math.acos(pole[2]))
+    assert abs(tilt - 47.5) < 0.1         # 90 - latitude from the vertical
+    midpoint = mount3d.vec_scale(mount3d.vec_add(ra_bar["a"], ra_bar["b"]), 0.5)
+    assert midpoint == (0.0, 0.0, 1.0)      # centred on the pier top
+    assert abs(mount3d.vec_norm(mount3d.vec_sub(ra_bar["b"], ra_bar["a"]))
+               - mount3d.RA_LENGTH) < EPS
+    assert abs(mount3d.vec_dot(
+        mount3d.vec_unit(mount3d.vec_sub(ra_bar["b"], ra_bar["a"])), pole) - 1.0) < EPS
+    dec_bar = by_width[8][0]
+    dec_mid = mount3d.vec_scale(mount3d.vec_add(dec_bar["a"], dec_bar["b"]), 0.5)
+    assert dec_mid == (0.0, 0.0, 1.0)       # at the centre of the RA bar
+    dec_dir = mount3d.vec_unit(mount3d.vec_sub(dec_bar["b"], dec_bar["a"]))
+    assert abs(mount3d.vec_dot(dec_dir, pole)) < EPS       # perpendicular to RA
+    tube = by_width[12][0]
+    tube_mid = mount3d.vec_scale(mount3d.vec_add(tube["a"], tube["b"]), 0.5)
+    head = (0.0, 0.0, 1.0)
+    # the tube is attached at the end of the DEC bar (directly on the axis)
+    on_dec_bar = min(
+        mount3d.vec_norm(mount3d.vec_sub(
+            tube_mid, mount3d.vec_add(head, mount3d.vec_scale(
+                dec_dir, mount3d.DEC_LENGTH / 2.0)))),
+        mount3d.vec_norm(mount3d.vec_sub(
+            tube_mid, mount3d.vec_sub(head, mount3d.vec_scale(
+                dec_dir, mount3d.DEC_LENGTH / 2.0)))))
+    assert on_dec_bar < EPS
+    approx(mount3d.vec_unit(mount3d.vec_sub(tube["b"], tube["a"])),
+           mount3d.dir_from_azalt(90.0, 0.0))
+
+
 def test_build_figure_parked_has_tube_pointing_south():
     figure = mount3d.build_figure(
         {"parked": True, "ra": None, "dec": None, "az": None, "alt": None,
@@ -88,7 +129,7 @@ def test_build_figure_parked_has_tube_pointing_south():
         {"lat": 48.2, "lon": 7.6})
     assert len(figure["segments"]) > 2
     south = mount3d.dir_from_azalt(180.0, 0.0)
-    tube = max(figure["segments"], key=lambda s: s["width"])
+    tube = next(s for s in figure["segments"] if s["width"] == 12)
     direction = mount3d.vec_sub(tube["b"], tube["a"])
     approx(mount3d.vec_unit(direction), south)
     labels = [text for _, text in figure["labels"]]

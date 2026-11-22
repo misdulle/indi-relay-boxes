@@ -8,8 +8,8 @@ and the figure builder.  World frame: +x = south, +y = east, +z = up
 import math
 
 PIER_HEIGHT = 1.0     # m, pier top above ground
-RA_LENGTH = 0.35      # m, RA housing along the pole axis
-DEC_LENGTH = 0.30     # m, DEC housing / saddle offset from the RA axis
+RA_LENGTH = 0.50      # m, polar (hour angle) bar, pointing at the NCP
+DEC_LENGTH = 0.30     # m, DEC bar through the centre of the RA bar
 TUBE_HALF = 0.55      # m, half length of the drawn tube
 
 
@@ -102,14 +102,15 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
 
     origin = (0.0, 0.0, 0.0)
     head = (0.0, 0.0, PIER_HEIGHT)
-    segments.append(_seg(origin, head, "#555555", 9))
+    segments.append(_seg(origin, head, "#555555", 13))
     labels.append((vec_scale(head, 1.02), "pier"))
 
     ra_dir = celestial_pole(lat) if lat is not None else None
     if ra_dir is not None:
-        ra_tip = vec_add(head, vec_scale(ra_dir, RA_LENGTH))
-        segments.append(_seg(head, ra_tip, "#8e44ad", 11))
-        labels.append((vec_add(ra_tip, vec_scale(ra_dir, 0.08)), "RA"))
+        back = vec_sub(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
+        tip = vec_add(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
+        segments.append(_seg(back, tip, "#8e44ad", 11))
+        labels.append((vec_add(tip, vec_scale(ra_dir, 0.08)), "RA"))
 
     tube_dir = _tube_direction(mount, lat)
     if tube_dir is None:
@@ -117,8 +118,10 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
 
     ra_axis = ra_dir or (0.0, -1.0, 0.0)
     dec = dec_axis(ra_axis, tube_dir)
-    saddle = vec_add(head, vec_scale(dec, DEC_LENGTH))
-    segments.append(_seg(head, saddle, "#8e44ad", 8))
+    dec_back = vec_sub(head, vec_scale(dec, DEC_LENGTH / 2.0))
+    saddle = vec_add(head, vec_scale(dec, DEC_LENGTH / 2.0))
+    segments.append(_seg(dec_back, saddle, "#8e44ad", 8))
+    labels.append((vec_add(saddle, vec_scale(dec, 0.06)), "DEC"))
     tail = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF))
     tip = vec_add(saddle, vec_scale(tube_dir, TUBE_HALF))
     segments.append(_seg(tail, tip, "#2e8b57", 12))
