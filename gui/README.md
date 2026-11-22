@@ -272,10 +272,12 @@ oriented by angles:
   then the parked pose (horizontal, pointing south) when
   `TELESCOPE_PARK.PARK` is on; the front lens is materialized as a filled
   disc at the pointing end, the camera as a filled square at the back end;
-- **Orbiting the view** - right-click-drag anywhere on the 2D projections:
-  horizontal movement swings the 3D camera azimuth, vertical movement
-  changes its altitude. The result updates `mount3d_view` in memory until
-  the next config reload (the yaml keeps the start values).
+- **Orbiting the view** - right-click-drag on the 2D projections or on the
+  3D figure itself: horizontal movement swings the 3D camera azimuth,
+  vertical movement changes its altitude. The result updates `mount3d_view`
+  in memory until the next config reload (the yaml keeps the start values).
+- **Auto-scaling** - the figure is zoomed to fill the panel at any size, so
+  resizing the splitter window changes only its pixel size.
 
 `mount3d_view.az` / `mount3d_view.alt` set the camera position (from
 where you look at the mount); 200/25 gives a south-eastern, slightly

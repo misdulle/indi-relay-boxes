@@ -416,26 +416,77 @@ class ScopePanel(QGroupBox):
 
 
 class Mount3DCanvas(QWidget):
-    """Simple orthographic 3D stick figure of the german equatorial mount."""
+    """Simple orthographic 3D stick figure of the german equatorial mount.
+
+    Right-drag orbits the viewpoint (view_orbit: daz, dalt in degrees).
+    The figure is auto-scaled to fill the available area.
+    """
+
+    view_orbit = pyqtSignal(float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(240)
         self.figure = {"segments": [], "labels": [], "markers": [],
                        "view": (200.0, 25.0)}
+        self._orbit_pos = None
 
     def set_figure(self, figure):
         if figure is not None:
             self.figure = figure
         self.update()
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = event.pos()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._orbit_pos is None or not (event.buttons() & Qt.RightButton):
+            super().mouseMoveEvent(event)
+            return
+        pos = event.pos()
+        daz = -(pos.x() - self._orbit_pos.x()) * 0.5
+        dalt = (pos.y() - self._orbit_pos.y()) * 0.3
+        self._orbit_pos = pos
+        self.view_orbit.emit(daz, dalt)
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _fit(self, rect, view_az, view_alt):
+        """scale/center so the figure fills the widget."""
+        points = [marker["point"] for marker in self.figure.get("markers", [])]
+        points += [point for point, _ in self.figure.get("labels", [])]
+        for seg in self.figure.get("segments", []):
+            points += [seg["a"], seg["b"]]
+        if not points:
+            return min(rect.width(), rect.height()) * 0.25, (
+                rect.center().x(), rect.center().y() + rect.height() * 0.18)
+        unit = [mount3d.project(point, view_az, view_alt, 1.0, (0.0, 0.0))
+                for point in points]
+        us = [u for u, _, _ in unit]
+        vs = [v for _, v, _ in unit]
+        uw = max(max(us) - min(us), 1e-3)
+        vh = max(max(vs) - min(vs), 1e-3)
+        scale = min(rect.width() * 0.88 / uw, rect.height() * 0.68 / vh)
+        center = (rect.center().x() - (min(us) + max(us)) / 2.0 * scale,
+                  rect.center().y() - (min(vs) + max(vs)) / 2.0 * scale)
+        return scale, center
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
         view_az, view_alt = self.figure.get("view", (200.0, 25.0))
-        center = (rect.center().x(), rect.center().y() + rect.height() * 0.18)
-        scale = min(rect.width(), rect.height()) * 0.25
+        scale, center = self._fit(rect, view_az, view_alt)
         painter.setPen(QPen(QColor("#777777")))
         for point, text in self.figure.get("labels", []):
             u, v, _ = mount3d.project(point, view_az, view_alt, scale, center)
@@ -840,6 +891,7 @@ class MainWindow(QMainWindow):
         self.disconnected_from_server.connect(self._on_disconnected)
         self.mode_event.connect(self._on_mode_event)
         self.scope_panel.orbit_requested.connect(self._orbit_3d)
+        self.mount3d_panel.view_orbit.connect(self._orbit_3d)
         self.mode_panel.mode_selected.connect(lambda mode: self.controller.set_mode(mode))
         self.mode_panel.abort_requested.connect(self.controller.abort_sequence)
         self.roof_panel.roof_open.connect(self._on_roof_open)
