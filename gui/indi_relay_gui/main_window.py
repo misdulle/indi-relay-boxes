@@ -5,11 +5,11 @@ import time
 import math
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
+from PyQt5.QtGui import QBrush, QColor, QKeySequence, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+    QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QShortcut,
+    QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .attitude import (alt_az, angle_between, format_dec, format_ra,
                        optical_axis, quat_angle)
@@ -588,7 +588,15 @@ class MainWindow(QMainWindow):
         menu = self.menuBar().addMenu("&File")
         reload_action = menu.addAction("Reload &config")
         reload_action.triggered.connect(self._reload_config)
-        menu.addAction("Quit").triggered.connect(self.close)
+        quit_action = menu.addAction("Quit")
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.triggered.connect(self.close)
+
+    def toggle_maximized(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     def _build_ui(self):
         central = QWidget()
@@ -638,6 +646,8 @@ class MainWindow(QMainWindow):
         self._ticker = QTimer(self)
         self._ticker.timeout.connect(self._tick)
         self._ticker.start(500)
+
+        QShortcut(QKeySequence("Ctrl+F"), self, self.toggle_maximized)
 
         splitter.setSizes([320, 360, 420])
         self.setCentralWidget(central)

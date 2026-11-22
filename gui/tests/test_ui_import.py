@@ -20,11 +20,12 @@ def mock_qt(monkeypatch):
     qtgui.QPainter = MagicMock()
     qtgui.QPen = MagicMock()
     qtgui.QPolygonF = MagicMock()
+    qtgui.QKeySequence = MagicMock()
     qtwidgets = types.ModuleType("PyQt5.QtWidgets")
     for name in ("QAbstractItemView", "QComboBox", "QFormLayout", "QGridLayout", "QGroupBox",
                  "QHBoxLayout", "QLabel", "QMainWindow", "QMessageBox", "QPlainTextEdit",
-                 "QPushButton", "QSplitter", "QTreeWidget", "QTreeWidgetItem", "QVBoxLayout",
-                 "QWidget", "QApplication"):
+                 "QPushButton", "QShortcut", "QSplitter", "QTreeWidget", "QTreeWidgetItem",
+                 "QVBoxLayout", "QWidget", "QApplication"):
         setattr(qtwidgets, name, MagicMock())
     monkeypatch.setitem(sys.modules, "PyQt5", types.ModuleType("PyQt5"))
     monkeypatch.setitem(sys.modules, "PyQt5.QtCore", qtcore)
