@@ -140,6 +140,20 @@ imu_optical_axis: +x   # IMU body axis that looks along the tube
 scope_view_rotation: 200   # top view rotated 200 deg clockwise: south up,
                            # plus 20 deg for the shed orientation
 
+mount3d_view:          # viewpoint of the 3D mount stick figure
+  az: 200              # camera azimuth (deg): looks at the mount from here
+  alt: 25              # camera altitude (deg), -80..80
+
+shed_cameras:          # RTSP cameras in the shed, picked from a dropdown
+  fps: 8               # default displayed frames per second, 1-30
+  cameras:             # free names = dropdown entries; "enabled" = at start
+    cam1:
+      enabled: true
+      url: rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2
+    cam2:
+      enabled: false
+      url: ""
+
 relay_exclude_names: [none]   # relays with these PORT_NAMES are not shown
 
 pi5_wake:              # direct HTTP switch of the pi5 power relay, see
@@ -245,6 +259,86 @@ side view (altitude).
 If site coordinates are missing or zero, only the IMU pointer is drawn;
 without a quaternion check, only the readouts.
 
+### 3D mount view
+
+In the right panel (between the checks panel and the log) the mount itself
+is drawn as a larger stick figure (orthographic, no GPU/3D library),
+oriented by angles, each part in its own color (pier sienna, polar axis
+blue, DEC axis red, tube green):
+
+- the **pillar** (80 cm, vertical) stands at the origin;
+- on top of the pillar, the **polar (hour angle) axis** is drawn as a
+  20 cm bar pointing at the celestial pole, fixed orientation - its
+  inclination is the site latitude the mount reports
+  (`GEOGRAPHIC_COORD`), e.g. 47.5° from the **horizontal** at
+  latitude 47.5°N; when the mount reports no usable site latitude the
+  bar is still drawn, using `FALLBACK_LATITUDE` = 45° (configure the
+  latitude in the EQMod driver to get the exact inclination);
+- **Synchronisation with the mount angles** - when the mount reports
+  `EQUATORIAL_EOD_COORD.RA`, `TIME_LST.LST` and `EQUATORIAL_EOD_COORD.DEC`,
+  the figure moves mechanically: the hour angle `HA = LST - RA` (in
+  hours x 15°) is the rotation of the DEC assembly about the polar axis,
+  with its **origin south** (HA = 0 puts the scope on the meridian,
+  pointing south), and `DEC` is the rotation of the tube about the DEC
+  axis (0° = perpendicular to the polar axis, pointing at the celestial
+  equator); the DEC axis stays exactly 90° from the polar axis and
+  `TELESCOPE_PIER_SIDE` flips it so the saddle sits on the real scope
+  side of the pier (west of the pier when parked, if PIER_WEST);
+  while `TELESCOPE_PARK.PARK` is on the figure stays in the parked pose
+  (horizontal, south). Without those angles the figure falls back to
+  `HORIZONTAL_COORD` AZ/ALT, then to the parked pose;
+- the **tube** lies perpendicular to the DEC axis, at `SADDLE_OFFSET` =
+  0.20 m from the polar-axis/DEC-axis intersection, and rotates about the
+  DEC axis; it is drawn **telescopic** (three sections,
+  widening towards the front), the front lens is materialized as a filled
+  disc at the pointing end, the camera as a filled square at the back end;
+- a **ground disc** (semi-transparent horizontal disc, `GROUND_RADIUS` =
+  0.6 m) sits at the base of the pier, with **N/E/S/W letters on the rim**
+  so the orientation is unambiguous (the projection is not mirrored:
+  when viewed from the south, west is on the left, like looking at the
+  real mount from behind the pier);
+- **Orbiting the view** - right-click-drag on the 2D projections or on the
+  3D figure itself: horizontal movement swings the 3D camera azimuth,
+  vertical movement changes its altitude. The result updates `mount3d_view`
+  in memory until the next config reload (the yaml keeps the start values);
+  **double-click** on the 3D figure resets the angles to the `mount3d_view`
+  values from the config file and a **right double-click** writes the
+  current angles back into the config file (comments in the yaml are
+  preserved).
+- **Auto-scaling** - the figure is zoomed to fill the panel at any size, so
+  resizing the splitter window changes only its pixel size.
+
+`mount3d_view.az` / `mount3d_view.alt` set the camera position (from
+where you look at the mount); 200/25 gives a south-eastern, slightly
+raised viewpoint matching the shed orientation. Tuning the stick lengths
+is a matter of editing the constants at the top of
+`indi_relay_gui/mount3d.py` (`PIER_HEIGHT` 0.8 m, `RA_LENGTH` 0.2 m,
+`SADDLE_OFFSET` 0.2 m, `TUBE_HALF`, ...).
+
+## Shed camera
+
+The middle panel can embed a live RTSP view of one or more cameras in the
+shed, selected from a dropdown listing **OFF** plus one entry per camera
+defined under `shed_cameras.cameras` (the free names you give them become
+the dropdown entries; `enabled: true` marks the one shown at start). The
+view runs on a dedicated background thread using OpenCV
+(`pip install opencv-python-headless` is needed):
+
+- to keep the CPU load low (typically < 5% of one core), the reader
+  continuously *grabs* the stream - which stays on the live edge - but only
+  *retrieves/decodes a frame* at `fps` (default 8, clamped to 1-30;
+  per-camera `fps` overrides `shed_cameras.fps`);
+- use the cameras' **substream** (second channel, usually a few hundred
+  kbps / small resolution) for the GUI URLs, e.g.
+  `rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2` on Hikvision;
+- the stream is read over TCP (`rtsp_transport;tcp`) to avoid UDP packet
+  loss artefacts;
+- on failure the view shows the reason and reconnects every 5 s; URLs are
+  never written to the log (credentials stripped);
+- picking another camera or OFF stops the previous reader; a camera without
+  a URL shows a hint instead. An old single `shed_camera:` block is still
+  accepted and becomes `cam1`.
+
 ### Adding new checks
 
 Add a class to `indi_relay_gui/checks.py` with `run_check(now) ->
@@ -260,6 +354,8 @@ anything doable in a sequence can be a reaction.
         indi.py          INDI client + XML stream parser
         model.py         property tree (relays, roof state, safety lights)
         attitude.py      quaternion / sky math for the position view
+        mount3d.py       3D stick figure of the GEM mount (pure python)
+        camera.py        low-fps RTSP reader thread (OpenCV, optional)
         sequence.py      step engine (used by starting/stopping and recoveries)
         checks.py        ping/udp/quaternion checks + scheduler
         controller.py    operating-mode state machine

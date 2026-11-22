@@ -26,6 +26,13 @@ def test_load_example_config():
     assert config["pi5_wake"]["enabled"] is True
     assert config["pi5_wake"]["relay"] == 1
     assert config["pi5_wake"]["ping_host"] == "192.168.1.29"
+    assert config["mount3d_view"] == {"az": 200.0, "alt": 25.0}
+    cameras = config["shed_cameras"]["cameras"]
+    assert cameras["cam1"]["url"] == (
+        "rtsp://user:pass@192.168.1.20:554/Streaming/Channels/2")
+    assert cameras["cam1"]["enabled"] is True
+    assert cameras["cam1"]["fps"] == 8.0
+    assert cameras["cam2"] == {"enabled": False, "url": "", "fps": 8.0}
 
 
 def test_defaults_fill_missing_sections():
@@ -40,6 +47,103 @@ def test_defaults_fill_missing_sections():
 def test_scope_view_rotation_normalized():
     config = config_module.normalize({"scope_view_rotation": "175"})
     assert config["scope_view_rotation"] == 175.0
+
+
+def test_shed_cameras_defaults_empty():
+    config = config_module.normalize({})
+    assert config["shed_cameras"] == {"fps": 8.0, "cameras": {}}
+
+
+def test_shed_cameras_normalized_sorted_with_own_fps():
+    config = config_module.normalize({
+        "shed_cameras": {"fps": 5, "cameras": {
+            "cam2": {"enabled": True, "url": "rtsp://host/2"},
+            "cam1": {"url": "rtsp://host/1", "fps": 22}}}})
+    assert list(config["shed_cameras"]["cameras"]) == ["cam1", "cam2"]
+    assert config["shed_cameras"]["cameras"]["cam1"] == {
+        "enabled": False, "url": "rtsp://host/1", "fps": 22.0}
+    assert config["shed_cameras"]["fps"] == 5.0
+    assert config["shed_cameras"]["cameras"]["cam2"]["fps"] == 5.0
+
+
+def test_shed_camera_fps_clamped():
+    config = config_module.normalize({"shed_cameras": {"cameras": {"a": {"fps": 99}}}})
+    assert config["shed_cameras"]["cameras"]["a"]["fps"] == 30.0
+    config = config_module.normalize({"shed_cameras": {"cameras": {"a": {"fps": 0}}}})
+    assert config["shed_cameras"]["cameras"]["a"]["fps"] == 1.0
+    config = config_module.normalize({"shed_cameras": {"fps": 99}})
+    assert config["shed_cameras"]["fps"] == 30.0
+
+
+def test_shed_camera_legacy_block_becomes_cam1():
+    config = config_module.normalize({
+        "shed_camera": {"enabled": "yes", "url": "rtsp://host/cam", "fps": "4"}})
+    assert config["shed_cameras"]["cameras"]["cam1"] == {
+        "enabled": True, "url": "rtsp://host/cam", "fps": 4.0}
+    assert "shed_camera" not in config
+
+
+def test_shed_cameras_bad_types_rejected():
+    with pytest.raises(ValueError, match="shed_cameras"):
+        config_module.normalize({"shed_cameras": "on"})
+    with pytest.raises(ValueError, match="cameras"):
+        config_module.normalize({"shed_cameras": {"cameras": ["a"]}})
+    with pytest.raises(ValueError, match="shed_cameras.a"):
+        config_module.normalize({"shed_cameras": {"cameras": {"a": 3}}})
+
+
+def test_mount3d_view_defaults():
+    config = config_module.normalize({})
+    assert config["mount3d_view"] == {"az": 200.0, "alt": 25.0}
+
+
+def test_mount3d_view_normalized():
+    config = config_module.normalize({"mount3d_view": {"az": 560, "alt": -90}})
+    assert config["mount3d_view"]["az"] == 200.0
+    assert config["mount3d_view"]["alt"] == -80.0
+
+
+def test_mount3d_view_bad_type_rejected():
+    with pytest.raises(ValueError, match="mount3d_view"):
+        config_module.normalize({"mount3d_view": [200, 25]})
+
+
+def test_update_section_values_replaces_in_place():
+    text = "indiserver:\n  host: 1.2.3.4\n\n# viewpoint comment\nmount3d_view:\n  az: 200\n  alt: 25\n\nroof_timeout_s: 180\n"
+    result = config_module.update_section_values(
+        text, "mount3d_view", {"az": 137.5, "alt": -12.0})
+    assert "az: 137.5" in result and "alt: -12.0" in result
+    assert "az: 200" not in result
+    assert "host: 1.2.3.4" in result
+    assert "# viewpoint comment" in result          # comments preserved
+    assert "roof_timeout_s: 180" in result
+    import yaml
+    parsed = yaml.safe_load(result)
+    assert parsed["mount3d_view"] == {"az": 137.5, "alt": -12.0}
+    assert parsed["indiserver"] == {"host": "1.2.3.4"}
+
+
+def test_update_section_values_appends_missing_keys_and_section():
+    result = config_module.update_section_values(
+        "mount3d_view:\n  az: 300\n", "mount3d_view", {"az": 10.0, "alt": 5.0})
+    assert "az: 10.0" in result and "alt: 5.0" in result
+    result = config_module.update_section_values(
+        "a: 1\n", "mount3d_view", {"az": 10.0, "alt": 5.0})
+    import yaml
+    parsed = yaml.safe_load(result)
+    assert parsed == {"a": 1, "mount3d_view": {"az": 10.0, "alt": 5.0}}
+
+
+def test_update_section_values_roundtrip_with_real_config():
+    import yaml
+    text, _ = _example_text()
+    result = config_module.update_section_values(
+        text, "mount3d_view", {"az": 111.0, "alt": -45.5})
+    parsed = yaml.safe_load(result)
+    assert parsed["mount3d_view"] == {"az": 111.0, "alt": -45.5}
+    assert config_module.normalize(parsed)["mount3d_view"] == {
+        "az": 111.0, "alt": -45.5}
+    assert parsed["shed_cameras"]["cameras"]["cam1"]["url"]
 
 
 def test_relay_exclude_names_are_normalized():

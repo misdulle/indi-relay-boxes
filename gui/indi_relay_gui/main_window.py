@@ -5,7 +5,8 @@ import time
 import math
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QKeySequence, QPainter, QPen, QPolygonF
+from PyQt5.QtGui import (QBrush, QColor, QImage, QKeySequence, QPainter, QPen,
+                         QPixmap, QPolygonF)
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QShortcut,
@@ -13,6 +14,7 @@ from PyQt5.QtWidgets import (
 
 from .attitude import (alt_az, angle_between, format_dec, format_ra,
                        optical_axis, quat_angle)
+from . import mount3d
 from .controller import Controller, Mode
 from .indi import IndiClient
 from .model import IndiModel
@@ -191,7 +193,10 @@ class ScopeCanvas(QWidget):
     The scope tube is drawn tangent to the pier circle; the tangency side is
     the mount pier side (TELESCOPE_PIER_SIDE), pointing south and horizontal
     when parked.  Front lens = filled arrow, camera = thick stub at the tail.
+    Right-drag orbits the 3D mount view (view_orbit: daz, dalt in degrees).
     """
+
+    view_orbit = pyqtSignal(float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -199,6 +204,33 @@ class ScopeCanvas(QWidget):
         self.data = {"mount": {}, "quat": None, "quat_age": None,
                      "measured": None, "predicted": None, "discrepancy": None,
                      "reference": None, "rotation": 200.0}
+        self._orbit_pos = None
+        self.setMouseTracking(False)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = event.pos()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._orbit_pos is None or not (event.buttons() & Qt.RightButton):
+            super().mouseMoveEvent(event)
+            return
+        pos = event.pos()
+        daz = -(pos.x() - self._orbit_pos.x()) * 0.5
+        dalt = (pos.y() - self._orbit_pos.y()) * 0.3
+        self._orbit_pos = pos
+        self.view_orbit.emit(daz, dalt)
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -337,6 +369,8 @@ class ScopeCanvas(QWidget):
 class ScopePanel(QGroupBox):
     """IMU + mount visualization: azimuth / altitude pointers and readouts."""
 
+    orbit_requested = pyqtSignal(float, float)
+
     def __init__(self, parent=None):
         super().__init__("Scope / mount position", parent)
         layout = QVBoxLayout(self)
@@ -345,6 +379,7 @@ class ScopePanel(QGroupBox):
         self.readout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         layout.addWidget(self.readout)
         self.canvas = ScopeCanvas()
+        self.canvas.view_orbit.connect(self.orbit_requested.emit)
         layout.addWidget(self.canvas, 1)
 
     def refresh(self, data):
@@ -378,6 +413,225 @@ class ScopePanel(QGroupBox):
             parts.append("difference %.1f" % data["discrepancy"])
         lines.append("point  " + ("; ".join(parts) if parts else "waiting"))
         self.readout.setText("\n".join(lines))
+
+
+class Mount3DCanvas(QWidget):
+    """Simple orthographic 3D stick figure of the german equatorial mount.
+
+    Right-drag orbits the viewpoint (view_orbit: daz, dalt in degrees);
+    left double-click asks for a reset to the config values (view_reset),
+    right double-click asks to save the current angles to the config
+    (view_save). The figure is auto-scaled to fill the available area.
+    """
+
+    view_orbit = pyqtSignal(float, float)
+    view_reset = pyqtSignal()
+    view_save = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(240)
+        self.figure = {"segments": [], "labels": [], "markers": [],
+                       "view": (200.0, 25.0)}
+        self._orbit_pos = None
+
+    def set_figure(self, figure):
+        if figure is not None:
+            self.figure = figure
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = event.pos()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._orbit_pos is None or not (event.buttons() & Qt.RightButton):
+            super().mouseMoveEvent(event)
+            return
+        pos = event.pos()
+        daz = -(pos.x() - self._orbit_pos.x()) * 0.5
+        dalt = (pos.y() - self._orbit_pos.y()) * 0.3
+        self._orbit_pos = pos
+        self.view_orbit.emit(daz, dalt)
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.view_reset.emit()
+            event.accept()
+            return
+        if event.button() == Qt.RightButton:
+            self.view_save.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _fit(self, rect, view_az, view_alt):
+        """scale/center so the figure fills the widget."""
+        points = []
+        for polygon in self.figure.get("polygons", []):
+            points += polygon["points"]
+        points += [marker["point"] for marker in self.figure.get("markers", [])]
+        points += [point for point, _ in self.figure.get("labels", [])]
+        for seg in self.figure.get("segments", []):
+            points += [seg["a"], seg["b"]]
+        if not points:
+            return min(rect.width(), rect.height()) * 0.25, (
+                rect.center().x(), rect.center().y() + rect.height() * 0.18)
+        unit = [mount3d.project(point, view_az, view_alt, 1.0, (0.0, 0.0))
+                for point in points]
+        us = [u for u, _, _ in unit]
+        vs = [v for _, v, _ in unit]
+        uw = max(max(us) - min(us), 1e-3)
+        vh = max(max(vs) - min(vs), 1e-3)
+        scale = min(rect.width() * 0.88 / uw, rect.height() * 0.68 / vh)
+        center = (rect.center().x() - (min(us) + max(us)) / 2.0 * scale,
+                  rect.center().y() - (min(vs) + max(vs)) / 2.0 * scale)
+        return scale, center
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
+        view_az, view_alt = self.figure.get("view", (200.0, 25.0))
+        scale, center = self._fit(rect, view_az, view_alt)
+        for polygon in self.figure.get("polygons", []):
+            poly = QPolygonF()
+            for point in polygon["points"]:
+                u, v, _ = mount3d.project(point, view_az, view_alt, scale, center)
+                poly.append(QPointF(u, v))
+            fill = QColor(polygon["color"])
+            fill.setAlpha(polygon.get("alpha", 70))
+            painter.setPen(QPen(QColor(polygon.get("edge", polygon["color"]))))
+            painter.setBrush(QBrush(fill))
+            painter.drawPolygon(poly)
+        painter.setPen(QPen(QColor("#777777")))
+        for point, text in self.figure.get("labels", []):
+            u, v, _ = mount3d.project(point, view_az, view_alt, scale, center)
+            painter.drawText(QPointF(u, v), text)
+        for segment in mount3d.sort_for_drawing(self.figure):
+            ua, va, _ = mount3d.project(segment["a"], view_az, view_alt, scale, center)
+            ub, vb, _ = mount3d.project(segment["b"], view_az, view_alt, scale, center)
+            pen = QPen(QColor(segment["color"]))
+            pen.setWidthF(max(1.5, segment["width"] * scale / 260.0))
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(ua, va), QPointF(ub, vb))
+        for marker in self.figure.get("markers", []):
+            self._draw_marker(painter, marker, view_az, view_alt, scale, center)
+
+    def _draw_marker(self, painter, marker, view_az, view_alt, scale, center):
+        u, v, _ = mount3d.project(marker["point"], view_az, view_alt,
+                                  scale, center)
+        if marker["kind"] == "lens":
+            radius = max(3.0, scale * 0.055)
+            painter.setPen(QPen(QColor("#eef7f2"), 1))
+            painter.setBrush(QBrush(QColor(marker["color"])))
+            painter.drawEllipse(QPointF(u, v), radius, radius)
+        else:
+            side = max(5.0, scale * 0.09)
+            painter.setPen(QPen(QColor("#eef7f2"), 1))
+            painter.setBrush(QBrush(QColor(marker["color"])))
+            painter.drawRect(QRectF(u - side / 2.0, v - side / 2.0, side, side))
+
+
+class CamPanel(QGroupBox):
+    """RTSP view of the camera inside the shed (low fps, low CPU)."""
+
+    frame_received = pyqtSignal(object)
+    status_changed = pyqtSignal(bool, str)
+
+    def __init__(self, config, log, parent=None):
+        super().__init__("Shed camera", parent)
+        self.setAlignment(Qt.AlignHCenter)
+        self._log = log
+        self._reader = None
+        self._config = config
+        self.view = QLabel("camera disabled")
+        self.view.setAlignment(Qt.AlignCenter)
+        self.view.setMinimumHeight(150)
+        self.view.setStyleSheet(
+            "background: #202020; color: #909090; font-size: 9pt;")
+        layout = QVBoxLayout(self)
+        self.picker = QComboBox()
+        self.picker.currentTextChanged.connect(self._on_pick)
+        layout.addWidget(self.picker)
+        layout.addWidget(self.view, 1)
+        self.frame_received.connect(self._on_frame)
+        self.status_changed.connect(self._on_status)
+        self.restart(config)
+
+    def restart(self, config):
+        self._config = config
+        self.stop()
+        cams = (config.get("shed_cameras") or {}).get("cameras") or {}
+        self.picker.blockSignals(True)
+        self.picker.clear()
+        self.picker.addItem("OFF")
+        for name in sorted(cams):
+            self.picker.addItem(name)
+        picked = next((name for name in sorted(cams)
+                       if cams[name].get("enabled") and cams[name].get("url")),
+                      "OFF")
+        self.picker.setCurrentText(picked)
+        self.picker.blockSignals(False)
+        self._apply_pick(picked, cams)
+
+    def _on_pick(self, name):
+        cams = (self._config.get("shed_cameras") or {}).get("cameras") or {}
+        self._apply_pick(name, cams)
+
+    def _apply_pick(self, name, cams):
+        self.stop()
+        if name == "OFF":
+            self.view.setPixmap(QPixmap())
+            self.view.setText("camera disabled")
+            return
+        settings = cams.get(name) or {}
+        if not settings.get("url"):
+            self.view.setPixmap(QPixmap())
+            self.view.setText("no url configured for %s" % name)
+            return
+        self._start_reader(settings)
+
+    def _start_reader(self, settings):
+        from .camera import RtspReader, strip_url_credentials
+        self._log("camera: connecting to %s"
+                  % strip_url_credentials(settings["url"]))
+        self._reader = RtspReader(
+            settings["url"], settings.get("fps", 8),
+            on_frame=self.frame_received.emit,
+            on_status=self.status_changed.emit)
+        self._reader.start()
+
+    def stop(self):
+        if self._reader is not None:
+            self._reader.stop()
+            self._reader = None
+
+    def _on_frame(self, frame):
+        if frame is None or frame.ndim != 3:
+            return
+        height, width = frame.shape[:2]
+        image = QImage(frame.data, width, height, int(frame.strides[0]),
+                       QImage.Format_BGR888).copy()
+        self.view.setPixmap(QPixmap.fromImage(image).scaled(
+            self.view.size(), Qt.KeepAspectRatio, Qt.FastTransformation))
+
+    def _on_status(self, ok, message):
+        if not ok:
+            self.view.setPixmap(QPixmap())
+            self.view.setText(message)
 
 
 class RoofPanel(QGroupBox):
@@ -627,19 +881,23 @@ class MainWindow(QMainWindow):
         self.roof_panel = RoofPanel()
         self.mode_panel = ModePanel()
         self.scope_panel = ScopePanel()
+        self.cam_panel = CamPanel(self.config, self.log)
         middle_layout.addWidget(self.roof_panel)
         middle_layout.addWidget(self.mode_panel)
         middle_layout.addWidget(self.scope_panel, 1)
+        middle_layout.addWidget(self.cam_panel, 1)
         splitter.addWidget(middle)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        self.mount3d_panel = Mount3DCanvas()
         self.heartbeats_panel = HeartbeatsPanel()
         self.checks_panel = ChecksPanel()
         self.log_panel = LogPanel()
         right_layout.addWidget(self.heartbeats_panel)
         right_layout.addWidget(self.checks_panel)
+        right_layout.addWidget(self.mount3d_panel, 1)
         right_layout.addWidget(self.log_panel, 1)
         splitter.addWidget(right)
 
@@ -667,6 +925,10 @@ class MainWindow(QMainWindow):
         self.message_received.connect(lambda dev, msg: self.log("[%s] %s" % (dev, msg)))
         self.disconnected_from_server.connect(self._on_disconnected)
         self.mode_event.connect(self._on_mode_event)
+        self.scope_panel.orbit_requested.connect(self._orbit_3d)
+        self.mount3d_panel.view_orbit.connect(self._orbit_3d)
+        self.mount3d_panel.view_reset.connect(self._reset_3d)
+        self.mount3d_panel.view_save.connect(self._save_3d)
         self.mode_panel.mode_selected.connect(lambda mode: self.controller.set_mode(mode))
         self.mode_panel.abort_requested.connect(self.controller.abort_sequence)
         self.roof_panel.roof_open.connect(self._on_roof_open)
@@ -799,14 +1061,19 @@ class MainWindow(QMainWindow):
         for name, monitor in self.controller.monitors.items():
             entries[name] = monitor.status(now)
         self.heartbeats_panel.refresh(now, entries)
-        self.scope_panel.refresh(self._scope_data(now))
+        self._refresh_scope(now)
+
+    def _refresh_scope(self, now):
+        data = self._scope_data(now)
+        self.scope_panel.refresh(data)
+        self.mount3d_panel.set_figure(data.get("figure"))
 
     def _scope_data(self, now):
         mount_device = self.config["devices"].get("mount")
         data = {"mount": self.model.mount_state(mount_device) or {},
                 "quat": None, "quat_age": None, "measured": None,
                 "predicted": None, "discrepancy": None, "reference": None,
-                "park_angle": None, "rotation":
+                "park_angle": None, "figure": None, "rotation":
                 float(self.config.get("scope_view_rotation", 200.0))}
         monitor = None
         for candidate in self.controller.monitors.values():
@@ -832,6 +1099,10 @@ class MainWindow(QMainWindow):
             data["reference"] = (180.0, 0.0)   # parked: horizontal, pointing south
         mount = data["mount"]
         site = self.model.site_coords(mount_device)
+        view3d = self.config.get("mount3d_view") or {"az": 200.0, "alt": 25.0}
+        data["figure"] = mount3d.build_figure(
+            mount, site,
+            float(view3d.get("az", 200.0)), float(view3d.get("alt", 25.0)))
         if (mount.get("ra") is not None and mount.get("dec") is not None
                 and site and (site["lat"] or site["lon"])):
             data["predicted"] = alt_az(mount["ra"], mount["dec"],
@@ -839,6 +1110,44 @@ class MainWindow(QMainWindow):
         if data["measured"] is not None and data["predicted"] is not None:
             data["discrepancy"] = angle_between(data["measured"], data["predicted"])
         return data
+
+    def _save_3d(self):
+        from . import config as config_module
+        view = self.config.get("mount3d_view") or {"az": 200.0, "alt": 25.0}
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+            new_text = config_module.update_section_values(
+                text, "mount3d_view",
+                {"az": round(float(view.get("az", 200.0)), 1),
+                 "alt": round(float(view.get("alt", 25.0)), 1)})
+            with open(self.config_path, "w", encoding="utf-8") as handle:
+                handle.write(new_text)
+            fresh = config_module.load(self.config_path)
+        except (OSError, ValueError) as error:
+            self.log("3d view save failed: %s" % error)
+            return
+        self.config["mount3d_view"] = fresh["mount3d_view"]
+        self.log("3d view angles saved to %s" % self.config_path)
+        self._refresh_scope(time.time())
+
+    def _reset_3d(self):
+        from . import config as config_module
+        try:
+            fresh = config_module.load(self.config_path)
+        except Exception as error:
+            self.log("3d view reset failed: %s" % error)
+            return
+        self.config["mount3d_view"] = fresh["mount3d_view"]
+        self.log("3d view reset to config angles")
+        self._refresh_scope(time.time())
+
+    def _orbit_3d(self, daz, dalt):
+        view = self.config.setdefault(
+            "mount3d_view", {"az": 200.0, "alt": 25.0})
+        view["az"] = (float(view.get("az", 200.0)) + daz) % 360.0
+        view["alt"] = max(-80.0, min(80.0, float(view.get("alt", 25.0)) + dalt))
+        self._refresh_scope(time.time())
 
     def _refresh_all(self):
         interactive = self.controller.relay_actions_allowed()
@@ -867,6 +1176,7 @@ class MainWindow(QMainWindow):
             self.log("config reload failed: %s" % error)
             return
         self.controller.config = self.config
+        self.cam_panel.restart(self.config)
         self.log("config reloaded from %s" % self.config_path)
         self._refresh_all()
 
@@ -879,6 +1189,7 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.Yes:
                 event.ignore()
                 return
+        self.cam_panel.stop()
         self.controller.shutdown()
         if self.client is not None:
             self.client.close()

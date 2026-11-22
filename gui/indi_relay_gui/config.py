@@ -2,6 +2,7 @@
 
 import copy
 import os
+import re
 
 import yaml
 
@@ -20,6 +21,8 @@ DEFAULTS = {
     "imu_optical_axis": "+x",          # IMU body axis pointing along the scope tube
     "scope_view_rotation": 200.0,      # top-view azimuths rotated by this many degrees
                                        # clockwise (200 = south up + 20 for the shed)
+    "shed_cameras": {"fps": 8.0, "cameras": {}},
+    "mount3d_view": {"az": 200.0, "alt": 25.0},
     "pi5_wake": {"enabled": False, "host": "192.168.1.23", "port": 80,
                  "user": "admin", "password": "", "relay": 1,
                  "timeout_s": 3, "wait_s": 90},
@@ -70,6 +73,36 @@ def normalize(raw):
     config["imu_optical_axis"] = axis
     config["scope_view_rotation"] = float(
         config.get("scope_view_rotation", DEFAULTS["scope_view_rotation"]))
+    legacy = config.pop("shed_camera", None)
+    cams = config.get("shed_cameras") or {}
+    if not isinstance(cams, dict):
+        raise ValueError("shed_cameras: expected a mapping")
+    default_fps = min(30.0, max(1.0, float(cams.get("fps", 8.0))))
+    cameras = cams.get("cameras") or {}
+    if not isinstance(cameras, dict):
+        raise ValueError("shed_cameras.cameras: expected a mapping")
+    cameras = dict(cameras)
+    if not cameras and isinstance(legacy, dict) and legacy.get("url"):
+        cameras["cam1"] = legacy   # old single-camera config
+    normalized_cams = {}
+    for name, settings in sorted(cameras.items()):
+        if settings is None:
+            settings = {}
+        if not isinstance(settings, dict):
+            raise ValueError("shed_cameras.%s: expected a mapping" % name)
+        normalized_cams[str(name)] = {
+            "enabled": bool(settings.get("enabled", False)),
+            "url": str(settings.get("url", "")),
+            "fps": min(30.0, max(1.0, float(settings.get("fps", default_fps)))),
+        }
+    config["shed_cameras"] = {"fps": default_fps, "cameras": normalized_cams}
+    view3d = config.get("mount3d_view") or {}
+    if not isinstance(view3d, dict):
+        raise ValueError("mount3d_view: expected a mapping")
+    config["mount3d_view"] = {
+        "az": float(view3d.get("az", 200.0)) % 360.0,
+        "alt": max(-80.0, min(80.0, float(view3d.get("alt", 25.0)))),
+    }
     wake = config.get("pi5_wake") or {}
     if not isinstance(wake, dict):
         raise ValueError("pi5_wake: expected a mapping")
@@ -154,6 +187,63 @@ def load(path):
     if not isinstance(raw, dict):
         raise ValueError("config root must be a mapping")
     return normalize(raw)
+
+
+def _format_scalar(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float) and value.is_integer():
+        return "%.1f" % value
+    return repr(value)
+
+
+def update_section_values(text, section, updates):
+    """Edit `key: value` pairs of a top-level mapping in yaml *text*.
+
+    Comments and everything outside the section are preserved; missing keys
+    are appended to the section, a missing section is appended at the end.
+    """
+    pattern = re.compile(r"(\s*)(%s)\s*:.*?(\r?\n|$)" % "|".join(
+        re.escape(key) for key in updates))
+    lines = text.splitlines(keepends=True)
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            continue
+        if (line.split(":", 1)[0].strip() == section
+                and not line.startswith((" ", "\t"))):
+            start = index
+            break
+    result = list(lines)
+    if start is None:
+        block = "%s:\n" % section
+        if text and not text.endswith(("\n", "\r")):
+            block = "\n" + block
+        for key, value in updates.items():
+            block += "  %s: %s\n" % (key, _format_scalar(value))
+        return text + block
+    end = start + 1
+    while end < len(lines) and (lines[end].startswith((" ", "\t"))
+                                or not lines[end].strip()
+                                or lines[end].strip().startswith("#")):
+        end += 1
+    replaced = set()
+    for index in range(start + 1, end):
+        match = pattern.match(lines[index])
+        if match and match.group(2) not in replaced:
+            key = match.group(2)
+            tail = match.group(3) if match.group(3) else ""
+            result[index] = "%s%s: %s%s" % (
+                match.group(1), key, _format_scalar(updates[key]), tail)
+            replaced.add(key)
+    insert_at = end
+    for key, value in updates.items():
+        if key not in replaced:
+            result.insert(insert_at, "  %s: %s\n" % (key, _format_scalar(value)))
+            insert_at += 1
+    return "".join(result)
 
 
 def ensure_config(path, template_text):
