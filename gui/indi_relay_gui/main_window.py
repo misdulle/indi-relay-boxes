@@ -99,6 +99,7 @@ class RelayPanel(QGroupBox):
         self.alias = alias
         self._buttons = {}
         self._columns = max(1, int(columns))
+        self.setAlignment(Qt.AlignHCenter)
         self._grid = QGridLayout(self)
         self._grid.setSpacing(4)
 
@@ -385,6 +386,7 @@ class RoofPanel(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Roof", parent)
+        self.setAlignment(Qt.AlignHCenter)
         layout = QVBoxLayout(self)
         self.state_label = QLabel("offline")
         self.state_label.setAlignment(Qt.AlignCenter)
