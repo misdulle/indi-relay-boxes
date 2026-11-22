@@ -419,12 +419,14 @@ class Mount3DCanvas(QWidget):
     """Simple orthographic 3D stick figure of the german equatorial mount.
 
     Right-drag orbits the viewpoint (view_orbit: daz, dalt in degrees);
-    double-click asks for a reset to the config values (view_reset).
-    The figure is auto-scaled to fill the available area.
+    left double-click asks for a reset to the config values (view_reset),
+    right double-click asks to save the current angles to the config
+    (view_save). The figure is auto-scaled to fill the available area.
     """
 
     view_orbit = pyqtSignal(float, float)
     view_reset = pyqtSignal()
+    view_save = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -466,6 +468,10 @@ class Mount3DCanvas(QWidget):
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.view_reset.emit()
+            event.accept()
+            return
+        if event.button() == Qt.RightButton:
+            self.view_save.emit()
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -922,6 +928,7 @@ class MainWindow(QMainWindow):
         self.scope_panel.orbit_requested.connect(self._orbit_3d)
         self.mount3d_panel.view_orbit.connect(self._orbit_3d)
         self.mount3d_panel.view_reset.connect(self._reset_3d)
+        self.mount3d_panel.view_save.connect(self._save_3d)
         self.mode_panel.mode_selected.connect(lambda mode: self.controller.set_mode(mode))
         self.mode_panel.abort_requested.connect(self.controller.abort_sequence)
         self.roof_panel.roof_open.connect(self._on_roof_open)
@@ -1103,6 +1110,26 @@ class MainWindow(QMainWindow):
         if data["measured"] is not None and data["predicted"] is not None:
             data["discrepancy"] = angle_between(data["measured"], data["predicted"])
         return data
+
+    def _save_3d(self):
+        from . import config as config_module
+        view = self.config.get("mount3d_view") or {"az": 200.0, "alt": 25.0}
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+            new_text = config_module.update_section_values(
+                text, "mount3d_view",
+                {"az": round(float(view.get("az", 200.0)), 1),
+                 "alt": round(float(view.get("alt", 25.0)), 1)})
+            with open(self.config_path, "w", encoding="utf-8") as handle:
+                handle.write(new_text)
+            fresh = config_module.load(self.config_path)
+        except (OSError, ValueError) as error:
+            self.log("3d view save failed: %s" % error)
+            return
+        self.config["mount3d_view"] = fresh["mount3d_view"]
+        self.log("3d view angles saved to %s" % self.config_path)
+        self._refresh_scope(time.time())
 
     def _reset_3d(self):
         from . import config as config_module

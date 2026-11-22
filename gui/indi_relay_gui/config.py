@@ -2,6 +2,7 @@
 
 import copy
 import os
+import re
 
 import yaml
 
@@ -186,6 +187,63 @@ def load(path):
     if not isinstance(raw, dict):
         raise ValueError("config root must be a mapping")
     return normalize(raw)
+
+
+def _format_scalar(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float) and value.is_integer():
+        return "%.1f" % value
+    return repr(value)
+
+
+def update_section_values(text, section, updates):
+    """Edit `key: value` pairs of a top-level mapping in yaml *text*.
+
+    Comments and everything outside the section are preserved; missing keys
+    are appended to the section, a missing section is appended at the end.
+    """
+    pattern = re.compile(r"(\s*)(%s)\s*:.*?(\r?\n|$)" % "|".join(
+        re.escape(key) for key in updates))
+    lines = text.splitlines(keepends=True)
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            continue
+        if (line.split(":", 1)[0].strip() == section
+                and not line.startswith((" ", "\t"))):
+            start = index
+            break
+    result = list(lines)
+    if start is None:
+        block = "%s:\n" % section
+        if text and not text.endswith(("\n", "\r")):
+            block = "\n" + block
+        for key, value in updates.items():
+            block += "  %s: %s\n" % (key, _format_scalar(value))
+        return text + block
+    end = start + 1
+    while end < len(lines) and (lines[end].startswith((" ", "\t"))
+                                or not lines[end].strip()
+                                or lines[end].strip().startswith("#")):
+        end += 1
+    replaced = set()
+    for index in range(start + 1, end):
+        match = pattern.match(lines[index])
+        if match and match.group(2) not in replaced:
+            key = match.group(2)
+            tail = match.group(3) if match.group(3) else ""
+            result[index] = "%s%s: %s%s" % (
+                match.group(1), key, _format_scalar(updates[key]), tail)
+            replaced.add(key)
+    insert_at = end
+    for key, value in updates.items():
+        if key not in replaced:
+            result.insert(insert_at, "  %s: %s\n" % (key, _format_scalar(value)))
+            insert_at += 1
+    return "".join(result)
 
 
 def ensure_config(path, template_text):

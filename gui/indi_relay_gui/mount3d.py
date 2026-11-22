@@ -9,7 +9,8 @@ import math
 
 PIER_HEIGHT = 1.0     # m, pier top above ground
 RA_LENGTH = 0.50      # m, polar (hour angle) bar, pointing at the NCP
-DEC_LENGTH = 0.30     # m, DEC bar through the centre of the RA bar
+DEC_BACK = 0.15       # m, DEC bar extends this far on the counterweight side
+SADDLE_OFFSET = 0.40  # m, tube attachment offset along the DEC axis
 TUBE_HALF = 0.55      # m, half length of the drawn tube
 TUBE_WIDTHS = (13, 16, 21)   # telescopic look: wider towards the lens
 GROUND_RADIUS = 0.60  # m, ground disc at the base of the pier
@@ -133,9 +134,9 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
 
     ra_axis = ra_dir or (0.0, -1.0, 0.0)
     dec = dec_axis(ra_axis, tube_dir)
-    dec_back = vec_sub(head, vec_scale(dec, DEC_LENGTH / 2.0))
-    saddle = vec_add(head, vec_scale(dec, DEC_LENGTH / 2.0))
-    segments.append(_seg(dec_back, saddle, "#8e44ad", 11))
+    dec_start = vec_sub(head, vec_scale(dec, DEC_BACK))
+    saddle = vec_add(head, vec_scale(dec, SADDLE_OFFSET))
+    segments.append(_seg(dec_start, saddle, "#8e44ad", 11))
     labels.append((vec_add(saddle, vec_scale(dec, 0.08)), "DEC"))
     tail = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF))
     tip = vec_add(saddle, vec_scale(tube_dir, TUBE_HALF))

@@ -102,10 +102,17 @@ def test_gem_structure_pillar_ra_bar_dec_bar_tube():
     assert abs(mount3d.vec_dot(
         mount3d.vec_unit(mount3d.vec_sub(ra_bar["b"], ra_bar["a"])), pole) - 1.0) < EPS
     dec_bar = by_width[11][0]
-    dec_mid = mount3d.vec_scale(mount3d.vec_add(dec_bar["a"], dec_bar["b"]), 0.5)
-    assert dec_mid == (0.0, 0.0, 1.0)       # at the centre of the RA bar
     dec_dir = mount3d.vec_unit(mount3d.vec_sub(dec_bar["b"], dec_bar["a"]))
     assert abs(mount3d.vec_dot(dec_dir, pole)) < EPS       # perpendicular to RA
+    assert abs(mount3d.vec_norm(mount3d.vec_sub(dec_bar["b"], dec_bar["a"]))
+               - (mount3d.SADDLE_OFFSET + mount3d.DEC_BACK)) < EPS
+    # the bar runs from head - DEC_BACK (counterweight side) to the saddle
+    head0 = (0.0, 0.0, 1.0)
+    assert abs(mount3d.vec_norm(mount3d.vec_sub(dec_bar["a"], head0))
+               - mount3d.DEC_BACK) < EPS
+    saddle_offset_vec = mount3d.vec_sub(dec_bar["b"], head0)
+    assert abs(mount3d.vec_dot(saddle_offset_vec, dec_dir)
+               - mount3d.SADDLE_OFFSET) < EPS
     tube = [s for s in figure["segments"] if s["color"] == "#2e8b57"]
     assert len(tube) == len(mount3d.TUBE_WIDTHS)
     east = mount3d.dir_from_azalt(90.0, 0.0)
@@ -122,8 +129,8 @@ def test_gem_structure_pillar_ra_bar_dec_bar_tube():
                - 2.0 * mount3d.TUBE_HALF) < EPS
     head = (0.0, 0.0, 1.0)
     # the tube centreline is attached at the end of the DEC bar
-    dec_tip = mount3d.vec_add(head, mount3d.vec_scale(dec_dir, mount3d.DEC_LENGTH / 2.0))
-    dec_back = mount3d.vec_sub(head, mount3d.vec_scale(dec_dir, mount3d.DEC_LENGTH / 2.0))
+    dec_tip = mount3d.vec_add(head, mount3d.vec_scale(dec_dir, mount3d.SADDLE_OFFSET))
+    dec_back = mount3d.vec_sub(head, mount3d.vec_scale(dec_dir, mount3d.DEC_BACK))
     tube_mid = mount3d.vec_scale(mount3d.vec_add(tail, tip), 0.5)
     on_dec_bar = min(mount3d.vec_norm(mount3d.vec_sub(tube_mid, dec_tip)),
                      mount3d.vec_norm(mount3d.vec_sub(tube_mid, dec_back)))

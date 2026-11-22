@@ -271,9 +271,11 @@ oriented by angles:
   is 90° minus the site latitude the mount reports (`GEOGRAPHIC_COORD`);
 - at the **centre of that bar**, perpendicular to it, the **DEC axis**;
   it turns with the pointing (rotation about the polar axis);
-- the **tube** is attached directly to the DEC axis (perpendicular to
-  it), so it rotates about the DEC axis; its direction uses (in order of
-  preference) `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates,
+- the **tube** is attached to the DEC axis offset by `SADDLE_OFFSET` =
+  0.40 m along it (so it sits beside, not on, the polar axis) and stays
+  perpendicular to the DEC axis, rotating about it; its direction uses (in
+  order of preference) `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site
+  coordinates,
   then the parked pose (horizontal, pointing south) when
   `TELESCOPE_PARK.PARK` is on; it is drawn **telescopic** (three sections,
   widening towards the front), the front lens is materialized as a filled
@@ -285,7 +287,9 @@ oriented by angles:
   vertical movement changes its altitude. The result updates `mount3d_view`
   in memory until the next config reload (the yaml keeps the start values);
   **double-click** on the 3D figure resets the angles to the `mount3d_view`
-  values from the config file.
+  values from the config file and a **right double-click** writes the
+  current angles back into the config file (comments in the yaml are
+  preserved).
 - **Auto-scaling** - the figure is zoomed to fill the panel at any size, so
   resizing the splitter window changes only its pixel size.
 

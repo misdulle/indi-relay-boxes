@@ -108,6 +108,44 @@ def test_mount3d_view_bad_type_rejected():
         config_module.normalize({"mount3d_view": [200, 25]})
 
 
+def test_update_section_values_replaces_in_place():
+    text = "indiserver:\n  host: 1.2.3.4\n\n# viewpoint comment\nmount3d_view:\n  az: 200\n  alt: 25\n\nroof_timeout_s: 180\n"
+    result = config_module.update_section_values(
+        text, "mount3d_view", {"az": 137.5, "alt": -12.0})
+    assert "az: 137.5" in result and "alt: -12.0" in result
+    assert "az: 200" not in result
+    assert "host: 1.2.3.4" in result
+    assert "# viewpoint comment" in result          # comments preserved
+    assert "roof_timeout_s: 180" in result
+    import yaml
+    parsed = yaml.safe_load(result)
+    assert parsed["mount3d_view"] == {"az": 137.5, "alt": -12.0}
+    assert parsed["indiserver"] == {"host": "1.2.3.4"}
+
+
+def test_update_section_values_appends_missing_keys_and_section():
+    result = config_module.update_section_values(
+        "mount3d_view:\n  az: 300\n", "mount3d_view", {"az": 10.0, "alt": 5.0})
+    assert "az: 10.0" in result and "alt: 5.0" in result
+    result = config_module.update_section_values(
+        "a: 1\n", "mount3d_view", {"az": 10.0, "alt": 5.0})
+    import yaml
+    parsed = yaml.safe_load(result)
+    assert parsed == {"a": 1, "mount3d_view": {"az": 10.0, "alt": 5.0}}
+
+
+def test_update_section_values_roundtrip_with_real_config():
+    import yaml
+    text, _ = _example_text()
+    result = config_module.update_section_values(
+        text, "mount3d_view", {"az": 111.0, "alt": -45.5})
+    parsed = yaml.safe_load(result)
+    assert parsed["mount3d_view"] == {"az": 111.0, "alt": -45.5}
+    assert config_module.normalize(parsed)["mount3d_view"] == {
+        "az": 111.0, "alt": -45.5}
+    assert parsed["shed_cameras"]["cameras"]["cam1"]["url"]
+
+
 def test_relay_exclude_names_are_normalized():
     config = config_module.normalize({"relay_exclude_names": ["None", "SPARE"]})
     assert config["relay_exclude_names"] == ["none", "spare"]
