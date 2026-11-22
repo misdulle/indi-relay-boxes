@@ -142,6 +142,7 @@ class HeartbeatsPanel(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("Heartbeats", parent)
+        self.setAlignment(Qt.AlignHCenter)
         layout = QVBoxLayout(self)
         self.clock_label = QLabel("--:--:--")
         self.clock_label.setAlignment(Qt.AlignCenter)
@@ -529,6 +530,7 @@ class ModePanel(QGroupBox):
 class ConfigPanel(QGroupBox):
     def __init__(self, config, parent=None):
         super().__init__("Configuration", parent)
+        self.setAlignment(Qt.AlignHCenter)
         layout = QFormLayout(self)
         for key, value in config["indiserver"].items():
             label = QLabel(str(value))
