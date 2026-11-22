@@ -113,7 +113,7 @@ def test_gem_structure_pillar_ra_bar_dec_bar_tube():
     pier = by_width[15][0]
     assert pier["a"] == (0.0, 0.0, 0.0)
     assert pier["b"] == (0.0, 0.0, mount3d.PIER_HEIGHT)
-    ra_bar = by_width[14][0]
+    ra_bar = by_width[16][0]
     pole = mount3d.celestial_pole(47.5)
     elevation = math.degrees(math.asin(pole[2]))
     assert abs(elevation - 47.5) < 0.1    # inclined 47.5 from the HORIZONTAL
@@ -183,13 +183,28 @@ def test_build_figure_parked_has_tube_pointing_south():
     approx(camera["point"], tail)   # camera at the back end
 
 
-def test_build_figure_without_pointing_only_pier_and_ra():
+def test_polar_axis_always_drawn():
     figure = mount3d.build_figure({}, {"lat": 48.2, "lon": 7.6})
     assert len(figure["segments"]) == 2      # pier + RA axis (ground is a polygon)
     assert len(figure["polygons"]) == 1 and len(figure["polygons"][0]["points"]) == mount3d.DISC_POINTS
     assert [text for _, text in figure["labels"]] == ["pier", "RA"]
-    figure = mount3d.build_figure({}, None)
-    assert len(figure["segments"]) == 1      # pier only + ground
+    figure = mount3d.build_figure({}, None)  # no site: RA at the fallback latitude
+    assert len(figure["segments"]) == 2      # pier + RA axis + ground polygon
+    ra_bar = next(s for s in figure["segments"] if s["color"] == mount3d.RA_COLOR)
+    assert abs(mount3d.vec_norm(mount3d.vec_sub(ra_bar["b"], ra_bar["a"]))
+               - mount3d.RA_LENGTH) < EPS
+    pole = mount3d.celestial_pole(mount3d.FALLBACK_LATITUDE)
+    assert abs(mount3d.vec_dot(
+        mount3d.vec_unit(mount3d.vec_sub(ra_bar["b"], ra_bar["a"])), pole) - 1.0) < EPS
+
+
+def test_polar_axis_visible_length_at_45_deg():
+    figure = mount3d.build_figure({}, {"lat": 45.0})
+    ra_bar = next(s for s in figure["segments"] if s["color"] == mount3d.RA_COLOR)
+    assert ra_bar["width"] >= 15
+    pole = mount3d.celestial_pole(45.0)      # 45 deg off the vertical, north
+    assert abs(mount3d.vec_dot(
+        mount3d.vec_unit(mount3d.vec_sub(ra_bar["b"], ra_bar["a"])), pole) - 1.0) < EPS
 
 
 def test_sort_for_draws_far_first():

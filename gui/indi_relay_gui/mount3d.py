@@ -13,7 +13,8 @@ DEC_COLOR = "#d32f2f"    # declination axis
 TUBE_COLOR = "#2e8b57"
 
 PIER_HEIGHT = 0.80    # m, vertical pier
-RA_LENGTH = 0.40      # m, polar (hour angle) bar, pointing at the NCP
+RA_LENGTH = 0.60      # m, polar (hour angle) bar, pointing at the NCP
+FALLBACK_LATITUDE = 45.0   # used when the mount reports no site latitude
 DEC_BACK = 0.15       # m, DEC bar extends this far on the counterweight side
 SADDLE_OFFSET = 0.40  # m, tube attachment offset along the DEC axis
 TUBE_HALF = 0.55      # m, half length of the drawn tube
@@ -137,12 +138,11 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     segments.append(_seg(origin, head, PIER_COLOR, 15))
     labels.append((vec_scale(head, 1.02), "pier"))
 
-    ra_dir = celestial_pole(lat) if lat is not None else None
-    if ra_dir is not None:
-        back = vec_sub(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
-        tip = vec_add(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
-        segments.append(_seg(back, tip, RA_COLOR, 14))
-        labels.append((vec_add(tip, vec_scale(ra_dir, 0.10)), "RA"))
+    ra_dir = celestial_pole(lat if lat is not None else FALLBACK_LATITUDE)
+    back = vec_sub(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
+    tip = vec_add(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
+    segments.append(_seg(back, tip, RA_COLOR, 16))
+    labels.append((vec_add(tip, vec_scale(ra_dir, 0.10)), "RA"))
 
     tube_dir = _tube_direction(mount, lat)
     if tube_dir is None:

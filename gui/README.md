@@ -268,10 +268,12 @@ blue, DEC axis red, tube green):
 
 - the **pillar** (80 cm, vertical) stands at the origin;
 - on top of the pillar, the **polar (hour angle) axis** is drawn as a
-  40 cm bar pointing at the celestial pole, fixed orientation - its
+  60 cm bar pointing at the celestial pole, fixed orientation - its
   inclination is the site latitude the mount reports
   (`GEOGRAPHIC_COORD`), e.g. 47.5° from the **horizontal** at
-  latitude 47.5°N;
+  latitude 47.5°N; when the mount reports no usable site latitude the
+  bar is still drawn, using `FALLBACK_LATITUDE` = 45° (configure the
+  latitude in the EQMod driver to get the exact inclination);
 - the **DEC axis** is exactly 90° from the polar axis (verified by
   re-orthogonalization even in degenerate cases) and its rotation about
   the polar axis follows the pointing; `TELESCOPE_PIER_SIDE` flips it so
@@ -302,7 +304,7 @@ blue, DEC axis red, tube green):
 where you look at the mount); 200/25 gives a south-eastern, slightly
 raised viewpoint matching the shed orientation. Tuning the stick lengths
 is a matter of editing the constants at the top of
-`indi_relay_gui/mount3d.py` (`PIER_HEIGHT` 0.8 m, `RA_LENGTH` 0.4 m,
+`indi_relay_gui/mount3d.py` (`PIER_HEIGHT` 0.8 m, `RA_LENGTH` 0.6 m,
 `SADDLE_OFFSET` 0.4 m, `TUBE_HALF`, ...).
 
 ## Shed camera
