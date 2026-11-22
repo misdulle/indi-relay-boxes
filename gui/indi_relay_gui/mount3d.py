@@ -96,21 +96,23 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     lat = None
     if site and site.get("lat"):
         lat = site["lat"]
-    figure = {"segments": [], "labels": [], "view": (view_az, view_alt)}
+    figure = {"segments": [], "labels": [], "markers": [],
+              "view": (view_az, view_alt)}
     segments = figure["segments"]
     labels = figure["labels"]
+    markers = figure["markers"]
 
     origin = (0.0, 0.0, 0.0)
     head = (0.0, 0.0, PIER_HEIGHT)
-    segments.append(_seg(origin, head, "#555555", 13))
+    segments.append(_seg(origin, head, "#555555", 15))
     labels.append((vec_scale(head, 1.02), "pier"))
 
     ra_dir = celestial_pole(lat) if lat is not None else None
     if ra_dir is not None:
         back = vec_sub(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
         tip = vec_add(head, vec_scale(ra_dir, RA_LENGTH / 2.0))
-        segments.append(_seg(back, tip, "#8e44ad", 11))
-        labels.append((vec_add(tip, vec_scale(ra_dir, 0.08)), "RA"))
+        segments.append(_seg(back, tip, "#8e44ad", 14))
+        labels.append((vec_add(tip, vec_scale(ra_dir, 0.10)), "RA"))
 
     tube_dir = _tube_direction(mount, lat)
     if tube_dir is None:
@@ -120,13 +122,15 @@ def build_figure(mount, site=None, view_az=200.0, view_alt=25.0):
     dec = dec_axis(ra_axis, tube_dir)
     dec_back = vec_sub(head, vec_scale(dec, DEC_LENGTH / 2.0))
     saddle = vec_add(head, vec_scale(dec, DEC_LENGTH / 2.0))
-    segments.append(_seg(dec_back, saddle, "#8e44ad", 8))
-    labels.append((vec_add(saddle, vec_scale(dec, 0.06)), "DEC"))
+    segments.append(_seg(dec_back, saddle, "#8e44ad", 11))
+    labels.append((vec_add(saddle, vec_scale(dec, 0.08)), "DEC"))
     tail = vec_add(saddle, vec_scale(tube_dir, -TUBE_HALF))
     tip = vec_add(saddle, vec_scale(tube_dir, TUBE_HALF))
-    segments.append(_seg(tail, tip, "#2e8b57", 12))
-    labels.append((vec_add(tip, vec_scale(tube_dir, 0.08)), "lens"))
-    labels.append((vec_add(tail, vec_scale(tube_dir, -0.08)), "camera"))
+    segments.append(_seg(tail, tip, "#2e8b57", 17))
+    markers.append({"kind": "lens", "point": tip, "color": "#2e8b57"})
+    markers.append({"kind": "camera", "point": tail, "color": "#4a4a4a"})
+    labels.append((vec_add(tip, vec_scale(tube_dir, 0.12)), "lens"))
+    labels.append((vec_add(tail, vec_scale(tube_dir, -0.12)), "camera"))
     return figure
 
 

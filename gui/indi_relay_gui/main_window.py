@@ -193,7 +193,10 @@ class ScopeCanvas(QWidget):
     The scope tube is drawn tangent to the pier circle; the tangency side is
     the mount pier side (TELESCOPE_PIER_SIDE), pointing south and horizontal
     when parked.  Front lens = filled arrow, camera = thick stub at the tail.
+    Right-drag orbits the 3D mount view (view_orbit: daz, dalt in degrees).
     """
+
+    view_orbit = pyqtSignal(float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -201,6 +204,33 @@ class ScopeCanvas(QWidget):
         self.data = {"mount": {}, "quat": None, "quat_age": None,
                      "measured": None, "predicted": None, "discrepancy": None,
                      "reference": None, "rotation": 200.0}
+        self._orbit_pos = None
+        self.setMouseTracking(False)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = event.pos()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._orbit_pos is None or not (event.buttons() & Qt.RightButton):
+            super().mouseMoveEvent(event)
+            return
+        pos = event.pos()
+        daz = -(pos.x() - self._orbit_pos.x()) * 0.5
+        dalt = (pos.y() - self._orbit_pos.y()) * 0.3
+        self._orbit_pos = pos
+        self.view_orbit.emit(daz, dalt)
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.RightButton:
+            self._orbit_pos = None
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -339,6 +369,8 @@ class ScopeCanvas(QWidget):
 class ScopePanel(QGroupBox):
     """IMU + mount visualization: azimuth / altitude pointers and readouts."""
 
+    orbit_requested = pyqtSignal(float, float)
+
     def __init__(self, parent=None):
         super().__init__("Scope / mount position", parent)
         layout = QVBoxLayout(self)
@@ -347,14 +379,12 @@ class ScopePanel(QGroupBox):
         self.readout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         layout.addWidget(self.readout)
         self.canvas = ScopeCanvas()
+        self.canvas.view_orbit.connect(self.orbit_requested.emit)
         layout.addWidget(self.canvas, 1)
-        self.canvas3d = Mount3DCanvas()
-        layout.addWidget(self.canvas3d, 1)
 
     def refresh(self, data):
         self.canvas.data = dict(data)
         self.canvas.update()
-        self.canvas3d.set_figure(data.get("figure"))
         mount = data.get("mount") or {}
         lines = ["mount  RA %s  DEC %s  pier %s%s" % (
             format_ra(mount.get("ra")), format_dec(mount.get("dec")),
@@ -390,8 +420,9 @@ class Mount3DCanvas(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(170)
-        self.figure = {"segments": [], "labels": [], "view": (200.0, 25.0)}
+        self.setMinimumHeight(240)
+        self.figure = {"segments": [], "labels": [], "markers": [],
+                       "view": (200.0, 25.0)}
 
     def set_figure(self, figure):
         if figure is not None:
@@ -417,6 +448,22 @@ class Mount3DCanvas(QWidget):
             pen.setCapStyle(Qt.RoundCap)
             painter.setPen(pen)
             painter.drawLine(QPointF(ua, va), QPointF(ub, vb))
+        for marker in self.figure.get("markers", []):
+            self._draw_marker(painter, marker, view_az, view_alt, scale, center)
+
+    def _draw_marker(self, painter, marker, view_az, view_alt, scale, center):
+        u, v, _ = mount3d.project(marker["point"], view_az, view_alt,
+                                  scale, center)
+        if marker["kind"] == "lens":
+            radius = max(3.0, scale * 0.055)
+            painter.setPen(QPen(QColor("#eef7f2"), 1))
+            painter.setBrush(QBrush(QColor(marker["color"])))
+            painter.drawEllipse(QPointF(u, v), radius, radius)
+        else:
+            side = max(5.0, scale * 0.09)
+            painter.setPen(QPen(QColor("#eef7f2"), 1))
+            painter.setBrush(QBrush(QColor(marker["color"])))
+            painter.drawRect(QRectF(u - side / 2.0, v - side / 2.0, side, side))
 
 
 class CamPanel(QGroupBox):
@@ -758,11 +805,13 @@ class MainWindow(QMainWindow):
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        self.mount3d_panel = Mount3DCanvas()
         self.heartbeats_panel = HeartbeatsPanel()
         self.checks_panel = ChecksPanel()
         self.log_panel = LogPanel()
         right_layout.addWidget(self.heartbeats_panel)
         right_layout.addWidget(self.checks_panel)
+        right_layout.addWidget(self.mount3d_panel, 1)
         right_layout.addWidget(self.log_panel, 1)
         splitter.addWidget(right)
 
@@ -790,6 +839,7 @@ class MainWindow(QMainWindow):
         self.message_received.connect(lambda dev, msg: self.log("[%s] %s" % (dev, msg)))
         self.disconnected_from_server.connect(self._on_disconnected)
         self.mode_event.connect(self._on_mode_event)
+        self.scope_panel.orbit_requested.connect(self._orbit_3d)
         self.mode_panel.mode_selected.connect(lambda mode: self.controller.set_mode(mode))
         self.mode_panel.abort_requested.connect(self.controller.abort_sequence)
         self.roof_panel.roof_open.connect(self._on_roof_open)
@@ -966,6 +1016,13 @@ class MainWindow(QMainWindow):
         if data["measured"] is not None and data["predicted"] is not None:
             data["discrepancy"] = angle_between(data["measured"], data["predicted"])
         return data
+
+    def _orbit_3d(self, daz, dalt):
+        view = self.config.setdefault(
+            "mount3d_view", {"az": 200.0, "alt": 25.0})
+        view["az"] = (float(view.get("az", 200.0)) + daz) % 360.0
+        view["alt"] = max(-80.0, min(80.0, float(view.get("alt", 25.0)) + dalt))
+        self.scope_panel.refresh(self._scope_data(time.time()))
 
     def _refresh_all(self):
         interactive = self.controller.relay_actions_allowed()

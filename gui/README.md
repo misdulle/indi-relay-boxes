@@ -256,8 +256,9 @@ without a quaternion check, only the readouts.
 
 ### 3D mount view
 
-Below the two projections the mount itself is drawn as a small stick
-figure (orthographic, no GPU/3D library), oriented by angles:
+In the right panel (between the checks panel and the log) the mount itself
+is drawn as a larger stick figure (orthographic, no GPU/3D library),
+oriented by angles:
 
 - the **pillar** stands at the origin;
 - on top of the pillar, the **polar (hour angle) axis** is drawn as a
@@ -269,8 +270,12 @@ figure (orthographic, no GPU/3D library), oriented by angles:
   it), so it rotates about the DEC axis; its direction uses (in order of
   preference) `HORIZONTAL_COORD` AZ/ALT, then RA/Dec + site coordinates,
   then the parked pose (horizontal, pointing south) when
-  `TELESCOPE_PARK.PARK` is on; labelled `lens` (pointing) and `camera`
-  (back end).
+  `TELESCOPE_PARK.PARK` is on; the front lens is materialized as a filled
+  disc at the pointing end, the camera as a filled square at the back end;
+- **Orbiting the view** - right-click-drag anywhere on the 2D projections:
+  horizontal movement swings the 3D camera azimuth, vertical movement
+  changes its altitude. The result updates `mount3d_view` in memory until
+  the next config reload (the yaml keeps the start values).
 
 `mount3d_view.az` / `mount3d_view.alt` set the camera position (from
 where you look at the mount); 200/25 gives a south-eastern, slightly
