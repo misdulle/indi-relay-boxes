@@ -18,6 +18,9 @@ DEFAULTS = {
     "roof_timeout_s": 180,
     "imu_park_quaternion": None,       # (w, x, y, z) captured parked; enables the IMU drawing
     "imu_optical_axis": "+x",          # IMU body axis pointing along the scope tube
+    "pi5_wake": {"enabled": False, "host": "192.168.1.23", "port": 80,
+                 "user": "admin", "password": "", "relay": 1,
+                 "timeout_s": 3, "wait_s": 90},
 }
 
 _OPTICAL_AXES = ("+x", "-x", "+y", "-y", "+z", "-z")
@@ -63,6 +66,23 @@ def normalize(raw):
     if axis not in _OPTICAL_AXES:
         raise ValueError("imu_optical_axis: use one of %s" % ", ".join(_OPTICAL_AXES))
     config["imu_optical_axis"] = axis
+    wake = config.get("pi5_wake") or {}
+    if not isinstance(wake, dict):
+        raise ValueError("pi5_wake: expected a mapping")
+    wake.setdefault("ping_host", None)
+    wake["enabled"] = bool(wake.get("enabled", False))
+    wake["host"] = str(wake.get("host", DEFAULTS["pi5_wake"]["host"]))
+    wake["port"] = int(wake.get("port", 80))
+    if not 1 <= wake["port"] <= 65535:
+        raise ValueError("pi5_wake.port: out of range")
+    wake["user"] = str(wake.get("user", DEFAULTS["pi5_wake"]["user"]))
+    wake["password"] = str(wake.get("password", ""))
+    wake["relay"] = int(wake.get("relay", 1))
+    if not 1 <= wake["relay"] <= 8:
+        raise ValueError("pi5_wake.relay: KMTronic8 has relays 1..8")
+    wake["timeout_s"] = max(1.0, float(wake.get("timeout_s", 3)))
+    wake["wait_s"] = max(0.0, float(wake.get("wait_s", 90)))
+    config["pi5_wake"] = wake
     checks = config["checks"] or {}
     config["checks"] = {
         "interval_s": max(1, int(checks.get("interval_s", DEFAULTS["checks"]["interval_s"]))),

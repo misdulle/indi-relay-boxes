@@ -2,6 +2,7 @@ import time
 import xml.etree.ElementTree as ET
 
 
+from indi_relay_gui import controller as controller_module
 from indi_relay_gui.controller import CONNECT_POLL_S, Controller, Mode
 from indi_relay_gui.indi import vector_from_element
 from indi_relay_gui.model import IndiModel
@@ -59,6 +60,7 @@ def make_config(starting=None, stopping=None):
         "sequences": {"starting": starting or [], "stopping": stopping or []},
         "checks": {"interval_s": 15, "grace_s": 0, "items": []},
         "roof_timeout_s": 30,
+        "pi5_wake": {"enabled": False},
     }
 
 
@@ -290,3 +292,64 @@ def test_roof_movable_false_when_roof_offline():
     del controller.model.properties[("eulRoof", "DOME_SHUTTER")]
     assert controller.roof_movable() is False
     assert "roof driver offline" in controller.roof_block_reason()
+
+
+def make_wake_controller(enabled=True):
+    config = make_config()
+    config["pi5_wake"] = {"enabled": enabled, "host": "192.0.2.10", "port": 80,
+                          "user": "", "password": "", "relay": 3,
+                          "ping_host": "192.0.2.9", "timeout_s": 1, "wait_s": 60}
+    logs = []
+    controller = Controller(make_model(), FakeClient(), config, logs.append)
+    events = []
+    controller.add_listener(lambda event, payload: events.append((event, payload)))
+    return controller, events, logs
+
+
+def test_wake_pi5_switches_relay_then_reconnects(monkeypatch):
+    controller, events, logs = make_wake_controller()
+    pings = iter([False, True])
+    monkeypatch.setattr(controller_module.kmtronic, "host_reachable",
+                        lambda host, timeout_s: next(pings))
+    switches = []
+
+    def fake_set_relay(*args):
+        switches.append(args)
+        return "/FF0301"
+
+    monkeypatch.setattr(controller_module.kmtronic, "set_relay", fake_set_relay)
+    monkeypatch.setattr(controller_module, "PI5_POLL_S", 0.01)
+
+    assert controller.set_mode(Mode.STATIC) is True
+    assert wait_until(lambda: "reconnect_requested" in [e for e, _ in events])
+    assert switches == [("192.0.2.10", 80, "", "", 3, True, 1)]
+    assert controller.client.switches == []
+    assert "switching relay 3 on 192.0.2.10 directly" in " ".join(logs)
+    assert "no relay action needed" not in " ".join(logs)
+
+
+def test_wake_pi5_skipped_when_disabled(monkeypatch):
+    controller, events, logs = make_wake_controller(enabled=False)
+    called = []
+    monkeypatch.setattr(controller_module.kmtronic, "host_reachable",
+                        lambda *a: called.append("ping"))
+    monkeypatch.setattr(controller_module.kmtronic, "set_relay",
+                        lambda *a: called.append("relay"))
+
+    assert controller.set_mode(Mode.STATIC) is True
+    time.sleep(0.2)
+    assert called == []
+    assert events == [("mode_changed", Mode.STATIC)]
+
+
+def test_wake_pi5_skipped_when_pi5_pings(monkeypatch):
+    controller, events, logs = make_wake_controller()
+    monkeypatch.setattr(controller_module.kmtronic, "host_reachable", lambda *a: True)
+    called = []
+    monkeypatch.setattr(controller_module.kmtronic, "set_relay",
+                        lambda *a: called.append("relay"))
+
+    assert controller.set_mode(Mode.STATIC) is True
+    time.sleep(0.2)
+    assert called == []
+    assert "reconnect_requested" not in [e for e, _ in events]

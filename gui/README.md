@@ -44,6 +44,38 @@ nothing - e.g. `PORTS` is only defined once connected). Each driver's status
 appears as a row in the Heartbeats panel; a driver restart or an external
 disconnect triggers a new CONNECT automatically.
 
+## Pi5 wake-up (direct KMTronic8 HTTP)
+
+The indiserver runs on the pi5, so when the pi5 is down the whole INDI stack -
+including the KMTronic8 driver itself - is unreachable. Entering `static`
+from `inactive` therefore attempts a wake-up: the GUI pings the pi5
+(`ping_host`, default `indiserver.host`) and if it does not answer it switches
+the pi5 power relay on the KMTronic8 box **directly over HTTP**, using the
+same protocol as the KMTronic8 driver (`common/kmtronic_cmd.h`):
+
+- FF style: `GET /FF0N01` (relay N on) / `GET /FF0N00` (off)
+- CGI style (used when the box answers 404 to the FF style): read
+  `/status.xml`, then `GET /relays.cgi?relay=N` as a toggle
+- basic auth when a user is configured
+
+The relay is only commanded if the ping fails. Afterwards the GUI keeps
+pinging for up to `wait_s` seconds and, as soon as the pi5 is back, it
+reconnects to the indiserver and connects the drivers automatically. All of
+this runs in the background; the GUI stays in `static` meanwhile.
+
+```yaml
+pi5_wake:
+  enabled: true         # off by default
+  host: 192.168.1.23    # KMTronic8 box
+  port: 80
+  user: admin           # empty user = no auth
+  password: ""          # stored in plaintext in the yaml!
+  relay: 1              # 1..8: the relay powering the pi5
+  ping_host: 192.168.1.29   # defaults to indiserver.host
+  timeout_s: 3          # HTTP / ping timeout
+  wait_s: 90            # how long to watch for the pi5 coming back
+```
+
 ## Roof buttons and safety
 
 OPEN / CLOSE / STOP are push buttons, not toggles: pressing one sends a single
@@ -88,6 +120,17 @@ imu_park_quaternion: [0.108337, -0.022705, -0.081787, 0.990479]
 imu_optical_axis: +x   # IMU body axis that looks along the tube
 
 relay_exclude_names: [none]   # relays with these PORT_NAMES are not shown
+
+pi5_wake:              # direct HTTP switch of the pi5 power relay, see
+  enabled: true        #  "Pi5 wake-up" section below
+  host: 192.168.1.23
+  port: 80
+  user: admin
+  password: ""         # plaintext in the yaml!
+  relay: 1
+  ping_host: null      # defaults to indiserver.host
+  timeout_s: 3
+  wait_s: 90
 
 sequences:             # see "Step vocabulary" below
   starting: [...]

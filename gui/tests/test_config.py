@@ -23,6 +23,9 @@ def test_load_example_config():
     assert kinds["pi5_ping"] == "ping"
     assert kinds["imu_udp"] == "quaternion"
     assert config["checks"]["items"][1]["recovery"][0]["step"] == "relay_cycle"
+    assert config["pi5_wake"]["enabled"] is True
+    assert config["pi5_wake"]["relay"] == 1
+    assert config["pi5_wake"]["ping_host"] == "192.168.1.29"
 
 
 def test_defaults_fill_missing_sections():
@@ -79,3 +82,43 @@ def test_quaternion_check_parameters_validated():
     assert item["kind"] == "quaternion"
     assert item["port"] == 2346
     assert item["bind"] == "0.0.0.0"
+
+
+def test_pi5_wake_defaults_off():
+    config = config_module.normalize({})
+    assert config["pi5_wake"] == {
+        "enabled": False, "host": "192.168.1.23", "port": 80, "user": "admin",
+        "password": "", "relay": 1, "ping_host": None, "timeout_s": 3.0,
+        "wait_s": 90.0}
+
+
+def test_pi5_wake_normalized():
+    config = config_module.normalize({
+        "pi5_wake": {"enabled": "yes", "host": "192.168.1.40", "relay": "4",
+                     "ping_host": "192.168.1.30", "timeout_s": "2", "wait_s": 0}})
+    wake = config["pi5_wake"]
+    assert wake["enabled"] is True
+    assert wake["host"] == "192.168.1.40"
+    assert wake["relay"] == 4
+    assert wake["ping_host"] == "192.168.1.30"
+    assert wake["timeout_s"] == 2.0
+    assert wake["wait_s"] == 0.0
+
+
+def test_pi5_wake_relay_range_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"relay": 0}})
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"relay": 9}})
+
+
+def test_pi5_wake_port_range_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"port": 0}})
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": {"port": 70000}})
+
+
+def test_pi5_wake_bad_type_rejected():
+    with pytest.raises(ValueError):
+        config_module.normalize({"pi5_wake": "on"})

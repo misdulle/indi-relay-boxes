@@ -474,6 +474,7 @@ class LogPanel(QPlainTextEdit):
 
 
 class MainWindow(QMainWindow):
+    reconnect_event = pyqtSignal()
     vector_received = pyqtSignal(object)
     property_deleted = pyqtSignal(str, str)
     message_received = pyqtSignal(str, str)
@@ -562,6 +563,7 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.reconnect_button)
 
     def _wire(self):
+        self.reconnect_event.connect(self._on_reconnect_requested)
         self.vector_received.connect(self._on_vector)
         self.property_deleted.connect(self._on_property_deleted)
         self.message_received.connect(lambda dev, msg: self.log("[%s] %s" % (dev, msg)))
@@ -633,7 +635,14 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def _on_controller_event(self, event, payload):
+        if event == "reconnect_requested":
+            self.reconnect_event.emit()
+            return
         self.mode_event.emit(event, payload)
+
+    def _on_reconnect_requested(self):
+        self.log("pi5_wake: indiserver should be back - reconnecting")
+        self._connect()
 
     def _on_mode_event(self, event, payload):
         if event != "mode_changed":

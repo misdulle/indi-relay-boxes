@@ -11,11 +11,13 @@ Modes:
 import threading
 import time
 
+from . import kmtronic
 from .checks import CheckRunner, build_monitors
 from .sequence import SequenceRunner, StepContext
 
 
 CONNECT_POLL_S = 5.0
+PI5_POLL_S = 5.0
 
 
 class Mode:
@@ -224,6 +226,12 @@ class Controller:
                                      self.config["sequences"]["stopping"] or None,
                                      "stopping", Mode.INACTIVE)
                 return True
+            if target == Mode.STATIC:
+                was_inactive = self.mode == Mode.INACTIVE
+                self._set_mode_plain(Mode.STATIC)
+                if was_inactive:
+                    self._wake_pi5_static()
+                return True
             self._set_mode_plain(target)
             return True
 
@@ -246,6 +254,41 @@ class Controller:
             steps, ctx,
             on_done=lambda ok, error: self._sequence_done(key, mode, on_success, ok, error))
         self.runner.start()
+
+    def _wake_pi5_static(self):
+        """Entering static with the pi5 down: the indiserver (on the pi5) is
+        unreachable, so the KMTronic8 pi5 power relay is switched directly
+        over HTTP (same protocol as the KMTronic8 driver)."""
+        cfg = self.config.get("pi5_wake") or {}
+        if not cfg.get("enabled"):
+            return
+        ping_host = cfg.get("ping_host") or self.config["indiserver"]["host"]
+        relay = cfg["relay"]
+
+        def work():
+            if kmtronic.host_reachable(ping_host, cfg["timeout_s"]):
+                self.log("pi5_wake: %s is reachable, no relay action needed" % ping_host)
+                return
+            self.log("pi5_wake: %s unreachable -> switching relay %d on %s directly"
+                     % (ping_host, relay, cfg["host"]))
+            try:
+                path = kmtronic.set_relay(cfg["host"], cfg["port"], cfg["user"],
+                                          cfg["password"], relay, True, cfg["timeout_s"])
+            except Exception as error:
+                self.log("pi5_wake: could not switch the relay: %s" % error)
+                return
+            self.log("pi5_wake: pi5 power on (%s), waiting up to %.0f s for %s"
+                     % (path, cfg["wait_s"], ping_host))
+            deadline = time.time() + cfg["wait_s"]
+            while time.time() < deadline:
+                time.sleep(PI5_POLL_S)
+                if kmtronic.host_reachable(ping_host, cfg["timeout_s"]):
+                    self.log("pi5_wake: %s is back -> reconnect to the indiserver" % ping_host)
+                    self._emit("reconnect_requested")
+                    return
+            self.log("pi5_wake: %s still unreachable after waiting" % ping_host)
+
+        threading.Thread(target=work, daemon=True, name="pi5-wake").start()
 
     def _make_ctx(self, abort_event):
         return StepContext(self.model, self.client, self.config["devices"], self.log,
